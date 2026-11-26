@@ -739,6 +739,7 @@ function renderSidebar() {
   const tags = [...allTags().keys()].sort((a, b) => a.localeCompare(b, "it"));
   $("#tagSuggest").innerHTML = tags.map((t) => `<option value="${esc(t)}"></option>`).join("");
   $("#btnNew").disabled = S.readOnly; $("#btnNew2").disabled = S.readOnly;
+  applyLook();
   renderAcct();
 }
 
@@ -1130,6 +1131,7 @@ function agenda(from, days) {
   events().forEach((e) => { if (e.date >= from && e.date < to) out.push({ k: "ev", id: e.id, date: e.date, time: e.time || "", title: e.title }); });
   tasks().forEach((t) => { if (t.due && !t.done && t.due >= from && t.due < to) out.push({ k: "task", id: t.id, date: t.due, time: "", title: t.title }); });
   activeReminders().forEach((n) => { const d = new Date(n.reminder), k = ymd(d); if (k >= from && k < to) out.push({ k: "rem", id: n.id, date: k, time: hm(d), title: n.title || "Senza titolo" }); });
+  OL.inRange(from, to).forEach((e) => out.push({ k: "ol", id: e.id, date: e.date < from ? from : e.date, time: e.allDay ? "" : e.time, title: e.title }));
   return out.sort((a, b) => (a.date + (a.time || "~")).localeCompare(b.date + (b.time || "~")));
 }
 function noteChecklists() {
@@ -1339,6 +1341,7 @@ function newMenu(anchor) {
     { label: "Nota da modello…", icon: "i-tpl", disabled: ro, action: () => newFromTemplate() },
     { label: "Attività…", icon: "i-task", disabled: ro, action: () => newTaskDialog() },
     { label: "Evento…", icon: "i-cal", disabled: ro, action: () => newEvent() },
+    { label: "Nota vocale…", icon: "i-mic", disabled: ro || !Store.assets, action: () => recordVoice("new") },
     "-",
     { label: "Taccuino…", icon: "i-book", disabled: ro, action: addNotebook },
     sharedOn() && { label: "Spazio condiviso…", icon: "i-space", disabled: ro, action: addSpace },
@@ -1354,12 +1357,16 @@ function acctMenu(anchor) {
     { head: cloud ? (acc.username || S.myName || "Il tuo account Microsoft") : "Solo su questo dispositivo" },
     cloud && { label: "Sincronizza ora", icon: "i-cloud", k: Store.lastSync ? relDate(Store.lastSync) : "", action: () => { Store.needAuth = false; Store.sync(); } },
     cloud && { label: "Apri la cartella in OneDrive", icon: "i-book", action: openDriveFolder },
+    cloud && { label: P().outlook === false ? "Mostra il calendario Outlook" : "Nascondi il calendario Outlook", icon: "i-cal", action: () => { const on = P().outlook === false; setPrefs({ outlook: on }); renderAll(); if (on) OL.ensure(todayStr(), addDays(todayStr(), 14), true); toast(on ? "Calendario Outlook visibile" : "Calendario Outlook nascosto"); } },
     cloud && { label: P().readable === false ? "Attiva le copie leggibili (.html)" : "Disattiva le copie leggibili (.html)", icon: "i-file", action: () => OD.toggle() },
     cloud && P().readable !== false && { label: "Rigenera tutte le copie leggibili", icon: "i-redo", action: () => OD.syncAll() },
     !cloud && { label: "Collega OneDrive…", icon: "i-cloud", action: connectOneDrive },
     "-",
     { label: "Personalizza menu…", icon: "i-gear", disabled: S.readOnly, action: customizeMenu },
+    { label: "Colori dell'app…", icon: "i-swatch", disabled: S.readOnly, action: () => paletteMenu(anchor) },
+    { label: "Sfondo della Home…", icon: "i-pattern", disabled: S.readOnly, action: () => homeBgMenu(anchor) },
     !isDrawer() && { label: rail ? "Espandi il menu" : "Comprimi il menu", icon: rail ? "i-expand" : "i-collapse", action: toggleRail },
+    { label: "Aggiorna", icon: "i-refresh", action: refreshApp },
     "Notification" in window && Notification.permission === "default" && { label: "Attiva le notifiche dei promemoria", icon: "i-bell", action: askNotify },
     "-",
     { label: "Importa da Evernote…", icon: "i-import", disabled: S.readOnly, action: startImport },
@@ -1409,6 +1416,7 @@ function noteMenu(anchor) {
     { label: "Aggiungi attività collegata…", icon: "i-task", disabled: locked, action: () => newTaskDialog(ed.id) },
     { label: "Aggiungi evento collegato…", icon: "i-cal", disabled: locked, action: () => newEvent(todayStr(), ed.id) },
     { label: "Allega file…", icon: "i-clip", disabled: locked || !Store.assets, action: () => $("#fileInput").click() },
+    { label: "Registra una nota vocale…", icon: "i-mic", disabled: locked || !Store.assets, action: () => recordVoice("note") },
     "-",
     { label: "Esporta in Markdown", icon: "i-download", action: exportNote },
     { label: "Scarica come pagina .html", icon: "i-download", action: saveToOneDrive },
@@ -1470,7 +1478,8 @@ function taskRow(t) {
   return `<div class="row-i${t.done ? " done" : ""}"><button class="chk${t.done ? " on" : ""}" type="button" data-task-toggle="${esc(t.id)}" aria-pressed="${!!t.done}" aria-label="${t.done ? "Segna da fare" : "Segna come fatta"}: ${esc(t.title)}"${S.readOnly ? " disabled" : ""}></button><button class="grow" type="button" data-task-edit="${esc(t.id)}" title="Modifica">${esc(t.title || "Senza titolo")}</button>${n && n.kind === "note" ? `<button class="link-btn" type="button" data-note="${esc(t.noteId)}" title="Apri “${esc(n.title || "Senza titolo")}”">${ic("i-notes", "ic sm")}</button>` : ""}${t.due ? `<span class="due${dueClass(t.due, t.done)}">${esc(dueLabel(t.due))}</span>` : ""}</div>`;
 }
 function agendaRow(x) {
-  return `<div class="row-i"><span class="due${x.date === todayStr() ? " today" : ""}">${esc(dueLabel(x.date))}${x.time ? " " + esc(x.time) : ""}</span>${ic(x.k === "ev" ? "i-cal" : x.k === "rem" ? "i-bell" : "i-task", "ic sm")}<button class="grow" type="button" ${x.k === "ev" ? `data-ev="${esc(x.id)}"` : x.k === "rem" ? `data-note="${esc(x.id)}"` : `data-task-edit="${esc(x.id)}"`}>${esc(x.title || "Senza titolo")}</button></div>`;
+  const attr = x.k === "ev" ? `data-ev="${esc(x.id)}"` : x.k === "ol" ? `data-ol="${esc(x.id)}"` : x.k === "rem" ? `data-note="${esc(x.id)}"` : `data-task-edit="${esc(x.id)}"`;
+  return `<div class="row-i"><span class="due${x.date === todayStr() ? " today" : ""}">${esc(dueLabel(x.date))}${x.time ? " " + esc(x.time) : ""}</span>${ic(x.k === "ev" || x.k === "ol" ? "i-cal" : x.k === "rem" ? "i-bell" : "i-task", x.k === "ol" ? "ic sm ol-ic" : "ic sm")}<button class="grow" type="button" ${attr}${x.k === "ol" ? ' title="Dal calendario Outlook"' : ""}>${esc(x.title || "Senza titolo")}</button></div>`;
 }
 
 function pageHome() {
@@ -1487,6 +1496,7 @@ function pageHome() {
   const notesW = `<section class="w wide"><header><h2>${custom ? "Note in Home" : "Note recenti"}</h2><span class="acts-h">${hActs}</span></header><div class="mini-box mini-notes${box ? " sized" : ""}" id="miniBox"${boxStyle}>${ro ? "" : `<button class="mini new" type="button" data-pg="new-note">${ic("i-plus")}Nuova nota</button>`}${homeNotes.map((n) => tileCard(n, ro)).join("")}</div>${!homeNotes.length ? `<div class="empty-s">${custom ? "Hai tolto tutte le note dalla Home: usa Aggiungi per rimetterne." : "Ancora nessuna nota."}</div>` : ""}${ro ? "" : `<p class="pg-note">Trascina ⠿ per spostare un riquadro, × per toglierlo dalla Home (la nota resta). Per cambiare la misura del riquadro trascinane l'angolo in basso a destra.</p>`}</section>`;
   const open = tasks().filter((x) => !x.done).sort(byDue).slice(0, 7);
   const tasksW = `<section class="w"><header><h2>Attività</h2><button class="link-btn" type="button" data-go="tasks">Apri</button></header>${ro ? "" : `<form class="add-row" data-form="quick-task"><input class="field" name="t" type="text" placeholder="Aggiungi un'attività e premi Invio" autocomplete="off" aria-label="Nuova attività"></form>`}<div class="rows">${open.length ? open.map(taskRow).join("") : `<div class="empty-s">Nessuna attività da fare.</div>`}</div></section>`;
+  OL.ensure(todayStr(), addDays(todayStr(), 14));
   const up = agenda(todayStr(), 14).slice(0, 7);
   const calW = `<section class="w"><header><h2>Prossimi 14 giorni</h2><button class="link-btn" type="button" data-go="calendar">Calendario</button></header><div class="rows">${up.length ? up.map(agendaRow).join("") : `<div class="empty-s">Niente in programma.${ro ? "" : ` <button class="link-btn" type="button" data-pg="new-event">Aggiungi un evento</button>`}</div>`}</div></section>`;
   const rems = activeReminders().slice(0, 7);
@@ -1496,7 +1506,7 @@ function pageHome() {
   const padW = `<section class="w"><header><h2>Blocco appunti</h2>${ro ? "" : `<button class="link-btn" type="button" data-pg="scratch-note">Trasforma in nota</button>`}</header><textarea class="scratch" id="scratch" placeholder="Annota qualcosa al volo…" aria-label="Blocco appunti"${ro ? " readonly" : ""}>${esc(P().scratch || "")}</textarea></section>`;
   const tags = allTags(), tl = [...tags.keys()].sort((a, b) => tags.get(b) - tags.get(a)).slice(0, 30);
   const tagW = `<section class="w"><header><h2>Tag</h2><button class="link-btn" type="button" data-go="tags">Gestisci</button></header>${tl.length ? `<div class="tag-cloud">${tl.map((t) => `<button type="button" data-tag="${esc(t)}">${esc(t)}<span class="n">${tags.get(t)}</span></button>`).join("")}</div>` : `<div class="empty-s">Nessun tag ancora.</div>`}</section>`;
-  return pgHead(greet, "", cap(fLong.format(new Date()))) + `<div class="widgets">${notesW}${tasksW}${remW}${calW}${scW}${padW}${tagW}</div>`;
+  return pgHead(greet, WX.html(), cap(fLong.format(new Date()))) + `<div class="widgets">${notesW}${tasksW}${remW}${calW}${scW}${padW}${tagW}</div>`;
 }
 
 function pageTasks() {
@@ -1529,12 +1539,17 @@ function pageCalendar() {
   events().forEach((e) => e.date && push(e.date, { k: "ev", ...e }));
   tasks().forEach((t) => t.due && push(t.due, { k: "task", ...t }));
   activeReminders().forEach((n) => { const d = new Date(n.reminder); push(ymd(d), { k: "rem", id: n.id, time: hm(d), title: n.title || "Senza titolo" }); });
+  const gStart = ymd(new Date(y, m, 1 - offset)), gEnd = ymd(new Date(y, m, 1 - offset + 42));
+  OL.ensure(gStart, gEnd);
+  OL.inRange(gStart, gEnd).forEach((e) => { for (let k = e.date < gStart ? gStart : e.date, n = 0; k <= (e.endDate || e.date) && k < gEnd && n < 42; k = addDays(k, 1), n++) push(k, { k: "ol", id: e.id, time: e.allDay ? "" : e.time, title: e.title }); });
   let cells = ["lun", "mar", "mer", "gio", "ven", "sab", "dom"].map((d) => `<div class="dow">${d}</div>`).join("");
   for (let i = 0; i < 42; i++) {
     const d = new Date(y, m, 1 - offset + i), k = ymd(d);
     const items = (byDay.get(k) || []).sort((a, b) => (a.k !== "task" ? a.time || "00" : "99").localeCompare(b.k !== "task" ? b.time || "00" : "99"));
     cells += `<div class="day${d.getMonth() !== m ? " out" : ""}${k === t0 ? " today" : ""}" data-day="${k}" tabindex="0" role="button" aria-label="${esc(fLong.format(d))}${items.length ? ", " + items.length + (items.length === 1 ? " elemento" : " elementi") : ""}${S.readOnly ? "" : ". Premi per aggiungere un evento"}"><span class="num">${d.getDate()}</span>${items.slice(0, 3).map((x) => x.k === "rem"
       ? `<button class="ev rem" type="button" data-note="${esc(x.id)}" title="Promemoria ${esc(x.time)}: ${esc(x.title)}">🔔 ${esc(x.time)} ${esc(x.title)}</button>`
+      : x.k === "ol"
+      ? `<button class="ev ol" type="button" data-ol="${esc(x.id)}" title="Outlook${x.time ? " " + esc(x.time) : ""}: ${esc(x.title)}">${x.time ? esc(x.time) + " " : ""}${esc(x.title)}</button>`
       : x.k === "ev"
       ? `<button class="ev" type="button" data-ev="${esc(x.id)}" title="${esc((x.time ? x.time + " " : "") + (x.title || ""))}">${x.time ? esc(x.time) + " " : ""}${esc(x.title || "Evento")}</button>`
       : `<button class="ev task${x.done ? " done" : ""}" type="button" data-task-edit="${esc(x.id)}" title="Attività: ${esc(x.title || "")}">☐ ${esc(x.title || "Attività")}</button>`).join("")}${items.length > 3 ? `<span class="more-ev">+${items.length - 3} altri</span>` : ""}</div>`;
@@ -1542,7 +1557,7 @@ function pageCalendar() {
   const days = new Date(y, m + 1, 0).getDate();
   const ag = agenda(ymd(first), days);
   const acts = `<div class="cal-nav"><button class="btn" type="button" data-cal="today">Oggi</button><button class="icon-btn" type="button" data-cal="prev" aria-label="Mese precedente">${ic("i-back")}</button><button class="icon-btn" type="button" data-cal="next" aria-label="Mese successivo">${ic("i-fwd")}</button>${S.readOnly ? "" : `<button class="btn primary" type="button" data-pg="new-event">${ic("i-plus", "ic sm")}Evento</button>`}</div>`;
-  return pgHead(cap(fMonth.format(first)), acts, "Calendario") + `<div class="cal">${cells}</div><section class="w"><header><h2>In questo mese</h2></header><div class="rows">${ag.length ? ag.map(agendaRow).join("") : `<div class="empty-s">Nessun evento o attività con scadenza in questo mese.</div>`}</div></section>`;
+  return pgHead(cap(fMonth.format(first)), acts, "Calendario") + olNote() + `<div class="cal">${cells}</div><section class="w"><header><h2>In questo mese</h2></header><div class="rows">${ag.length ? ag.map(agendaRow).join("") : `<div class="empty-s">Nessun evento o attività con scadenza in questo mese.</div>`}</div></section>`;
 }
 
 function pageFiles() {
@@ -1596,6 +1611,8 @@ function renderPage(force) {
   }
   const h = t === "home" ? pageHome() : t === "tasks" ? pageTasks() : t === "calendar" ? pageCalendar() : t === "files" ? pageFiles() : t === "notebooks" ? pageNotebooks() : t === "tags" ? pageTags() : pageSpaces();
   pagePane.innerHTML = `<div class="pg">${h}</div>`;
+  applyHomeBg();
+  if (t === "home") WX.refresh();
   hydrate(pagePane, true);
   pagePane.scrollTop = top;
   if (refocus) { const el = $(refocus, pagePane); if (el) el.focus({ preventScroll: true }); }
@@ -1640,7 +1657,7 @@ function watchHomeBox() {
 
 /* ---------- page background ---------- */
 const PAPER_COLORS = [["", "Bianco"], ["yellow", "Giallo"], ["green", "Verde"], ["blue", "Azzurro"], ["pink", "Rosa"], ["purple", "Lilla"], ["orange", "Pesca"], ["gray", "Grigio"]];
-const PAPER_STYLES = [["", "Liscio"], ["grid", "Quadretti"], ["lines", "Righe larghe"], ["lines-tight", "Righe strette"]];
+const PAPER_STYLES = [["", "Liscio"], ["grid", "Quadretti"], ["grid-small", "Quadretti piccoli"], ["lines", "Righe larghe"], ["lines-tight", "Righe strette"]];
 const PAPER_HEX = { yellow: "#fff7d1", green: "#e6f5e8", blue: "#e5effb", pink: "#fde8ee", purple: "#efe9fb", orange: "#fdeedc", gray: "#eef0f3" };
 const paperColor = (n) => (n && PAPER_HEX[n.paperColor] ? n.paperColor : "");
 const paperStyle = (n) => (n && PAPER_STYLES.some((s) => s[0] && s[0] === n.paper) ? n.paper : "");
@@ -1658,7 +1675,7 @@ function paperCss(n) {
   const c = paperColor(n), s = paperStyle(n), line = "rgba(47,84,212,.17)";
   if (!c && !s) return "";
   let css = "background-color:" + (c ? PAPER_HEX[c] : "#fff") + ";";
-  if (s === "grid") css += `background-image:linear-gradient(${line} 1px,transparent 1px),linear-gradient(90deg,${line} 1px,transparent 1px);background-size:24px 24px;`;
+  if (s === "grid" || s === "grid-small") { const g = s === "grid" ? 24 : 12; css += `background-image:linear-gradient(${line} 1px,transparent 1px),linear-gradient(90deg,${line} 1px,transparent 1px);background-size:${g}px ${g}px;`; }
   else if (s) css += `background-image:linear-gradient(transparent calc(100% - 1px),${line} 0);background-size:100% ${s === "lines" ? 36 : 22}px;`;
   return `html{${css}color-scheme:light}body{background:transparent!important;color:#1a1f29!important}`;
 }
@@ -1695,6 +1712,416 @@ function paperMenu(anchor) {
   const first = pop.querySelector('[aria-pressed="true"]') || pop.querySelector("button");
   if (first) first.focus();
   armOutside();
+}
+
+/* ---------- app colours (prefs.palette) and Home background (prefs.homeBg) ---------- */
+const PALETTES = {
+  "": { name: "Classico",
+    light: { accent: "#2f54d4", "accent-soft": "#e7ecfc", "accent-fg": "#ffffff", side: "#1a2130", "side-fg": "#d8dde7", "side-muted": "#8b94a7", "side-hover": "#252e40", "side-active": "#2e3a55", bg: "#f4f6f9" } },
+  foresta: { name: "Foresta",
+    light: { accent: "#2f7d4f", "accent-soft": "#e2f2e8", "accent-fg": "#ffffff", side: "#17261d", "side-fg": "#d6e4da", "side-muted": "#8aa394", "side-hover": "#22362a", "side-active": "#2b4636", bg: "#f2f6f3", hb: "rgba(47,125,79,.09)", hbs: "rgba(47,125,79,.26)" },
+    dark: { accent: "#6fcf97", "accent-soft": "#1a2e22", "accent-fg": "#0c140f", side: "#0d1510", "side-fg": "#cfe0d4", "side-muted": "#7c9786", "side-hover": "#16221a", "side-active": "#1e3024", bg: "#111712", hb: "rgba(111,207,151,.09)", hbs: "rgba(111,207,151,.26)" } },
+  tramonto: { name: "Tramonto",
+    light: { accent: "#c2410c", "accent-soft": "#fdebe1", "accent-fg": "#ffffff", side: "#2a1a14", "side-fg": "#efdcd3", "side-muted": "#b08f80", "side-hover": "#3a251c", "side-active": "#4a2f23", bg: "#f8f4f1", hb: "rgba(194,65,12,.08)", hbs: "rgba(194,65,12,.24)" },
+    dark: { accent: "#fb923c", "accent-soft": "#3a2216", "accent-fg": "#1a0e08", side: "#170e0a", "side-fg": "#ead7cd", "side-muted": "#a08476", "side-hover": "#221510", "side-active": "#2e1c14", bg: "#17120f", hb: "rgba(251,146,60,.09)", hbs: "rgba(251,146,60,.26)" } },
+  lavanda: { name: "Lavanda",
+    light: { accent: "#7c3aed", "accent-soft": "#efe7fd", "accent-fg": "#ffffff", side: "#221a33", "side-fg": "#e0d8f0", "side-muted": "#9d90b8", "side-hover": "#2e2444", "side-active": "#3b2f57", bg: "#f6f4fa", hb: "rgba(124,58,237,.08)", hbs: "rgba(124,58,237,.24)" },
+    dark: { accent: "#b794f6", "accent-soft": "#2a2141", "accent-fg": "#120c1f", side: "#120e1c", "side-fg": "#dcd3ee", "side-muted": "#8f82ab", "side-hover": "#1b1529", "side-active": "#251d38", bg: "#14111b", hb: "rgba(183,148,246,.09)", hbs: "rgba(183,148,246,.26)" } },
+  mare: { name: "Mare",
+    light: { accent: "#0e7490", "accent-soft": "#dff1f6", "accent-fg": "#ffffff", side: "#102a33", "side-fg": "#d3e8ee", "side-muted": "#86a9b4", "side-hover": "#183844", "side-active": "#1f4655", bg: "#f1f6f8", hb: "rgba(14,116,144,.08)", hbs: "rgba(14,116,144,.24)" },
+    dark: { accent: "#5ec8de", "accent-soft": "#13303a", "accent-fg": "#06161b", side: "#0a1a20", "side-fg": "#cfe5eb", "side-muted": "#7fa2ad", "side-hover": "#11252d", "side-active": "#183240", bg: "#0f1619", hb: "rgba(94,200,222,.09)", hbs: "rgba(94,200,222,.26)" } },
+  rosa: { name: "Rosa antico",
+    light: { accent: "#be185d", "accent-soft": "#fce7f0", "accent-fg": "#ffffff", side: "#262626", "side-fg": "#e5e5e5", "side-muted": "#a3a3a3", "side-hover": "#333333", "side-active": "#404040", bg: "#f5f5f4", hb: "rgba(190,24,93,.07)", hbs: "rgba(190,24,93,.22)" },
+    dark: { accent: "#f472b6", "accent-soft": "#3a1c2b", "accent-fg": "#1a0a12", side: "#111111", "side-fg": "#e2e2e2", "side-muted": "#8f8f8f", "side-hover": "#1c1c1c", "side-active": "#262626", bg: "#141414", hb: "rgba(244,114,182,.09)", hbs: "rgba(244,114,182,.26)" } },
+};
+const HOME_BGS = [["", "Nessuna"], ["dots", "Puntini"], ["grid", "Quadretti"], ["diagonal", "Righe diagonali"], ["zigzag", "Zig-zag"], ["waves", "Scaglie"], ["checks", "Scacchi"], ["confetti", "Coriandoli"], ["gradient", "Sfumato"]];
+const curPalette = () => (PALETTES[P().palette] ? P().palette : "");
+const curHomeBg = () => (HOME_BGS.some((b) => b[0] === P().homeBg) ? P().homeBg : "");
+/* Palette CSS is generated once: a palette overrides the base colours, in light and in dark mode. */
+function injectPalettes() {
+  const decl = (o) => Object.entries(o).map(([k, v]) => `--${k}:${v}`).join(";");
+  const st = document.createElement("style");
+  st.textContent = Object.entries(PALETTES).filter(([k]) => k).map(([k, p]) =>
+    `:root[data-palette="${k}"]{${decl(p.light)}}@media (prefers-color-scheme: dark){:root[data-palette="${k}"]:not([data-theme="light"]){${decl(p.dark)}}}:root[data-palette="${k}"][data-theme="dark"]{${decl(p.dark)}}`).join("\n");
+  document.head.appendChild(st);
+}
+function applyPalette(k) {
+  if (k) document.documentElement.dataset.palette = k; else delete document.documentElement.dataset.palette;
+}
+function applyLook() {
+  const k = curPalette();
+  if ((document.documentElement.dataset.palette || "") !== k) applyPalette(k);
+  if (S.ready && lsGet("quaderno.palette") !== k) lsSet("quaderno.palette", k);
+}
+/* A small panel of visual choices that stays open while the user tries them. */
+function choicePop(anchor, { title, items, current, preview, onPick, note }) {
+  closeMenu();
+  const pop = $("#pop");
+  const draw = () => {
+    const cur = current();
+    pop.innerHTML = `<div class="hd">${esc(title)}</div><div class="pp-row">${items.map(([k, l]) => `<button type="button" class="pp-st" data-k="${esc(k)}" aria-pressed="${cur === k}">${preview(k)}${esc(l)}</button>`).join("")}</div>${note ? `<div class="hd" style="font-weight:400;white-space:normal;line-height:1.4">${esc(note)}</div>` : ""}`;
+  };
+  draw();
+  pop.classList.add("paper-pop");
+  placePop(anchor, {});
+  pop.onclick = (e) => {
+    const b = e.target.closest("[data-k]");
+    if (!b) return;
+    const k = b.dataset.k;
+    onPick(k);
+    draw();
+    const f = pop.querySelector(`[data-k="${CSS.escape(k)}"]`);
+    if (f) f.focus();
+  };
+  pop.onkeydown = (e) => {
+    if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); closeMenu(); if (anchor instanceof Element) anchor.focus(); return; }
+    if (/^Arrow/.test(e.key)) {
+      const bs = $$("button", pop), k = bs.indexOf(document.activeElement);
+      e.preventDefault();
+      bs[(k + (e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1) + bs.length) % bs.length].focus();
+    }
+  };
+  const first = pop.querySelector('[aria-pressed="true"]') || pop.querySelector("button");
+  if (first) first.focus();
+  armOutside();
+}
+function paletteMenu(anchor) {
+  choicePop(anchor, {
+    title: "Colori dell'app",
+    items: Object.entries(PALETTES).map(([k, p]) => [k, p.name]),
+    current: curPalette,
+    preview: (k) => { const c = PALETTES[k].light; return `<span class="pv pal-pv"><i style="background:${c.side}"></i><i style="background:${c.accent}"></i><i style="background:${c["accent-soft"]}"></i><i style="background:${c.bg}"></i></span>`; },
+    onPick: (k) => { setPrefs({ palette: k }); applyLook(); renderAll(); },
+    note: "Valgono anche in modalità scura. Il pulsante Condividi resta blu.",
+  });
+}
+function homeBgMenu(anchor) {
+  if (S.filter.type !== "home") setFilter({ type: "home" });
+  choicePop(anchor, {
+    title: "Sfondo della Home",
+    items: HOME_BGS,
+    current: curHomeBg,
+    preview: (k) => `<span class="pv hbg"${k ? ` data-hbg="${k}"` : ""}></span>`,
+    onPick: (k) => { setPrefs({ homeBg: k }); applyHomeBg(); },
+  });
+}
+function applyHomeBg() {
+  const k = S.filter.type === "home" ? curHomeBg() : "";
+  if (k) pagePane.dataset.hbg = k; else delete pagePane.dataset.hbg;
+}
+async function refreshApp() {
+  const b = $("#btnRefresh");
+  b.classList.add("spin"); b.disabled = true;
+  flushEditor();
+  const t0 = Date.now();
+  await sleep(300); // let the last edit start saving
+  while (Store.inflight && Store.inflight.size && Date.now() - t0 < 6000) await sleep(150); // wait only for saves already under way
+  location.reload();
+}
+
+/* ---------- weather (Open-Meteo: free, no account; it only receives the chosen city's coordinates) ---------- */
+const WX_CODES = { 0: ["☀️", "Sereno"], 1: ["🌤️", "Poco nuvoloso"], 2: ["⛅", "Parzialmente nuvoloso"], 3: ["☁️", "Nuvoloso"], 45: ["🌫️", "Nebbia"], 48: ["🌫️", "Nebbia con brina"], 51: ["🌦️", "Pioviggine debole"], 53: ["🌦️", "Pioviggine"], 55: ["🌦️", "Pioviggine intensa"], 56: ["🌧️", "Pioviggine gelata"], 57: ["🌧️", "Pioviggine gelata"], 61: ["🌧️", "Pioggia debole"], 63: ["🌧️", "Pioggia"], 65: ["🌧️", "Pioggia forte"], 66: ["🌧️", "Pioggia gelata"], 67: ["🌧️", "Pioggia gelata forte"], 71: ["🌨️", "Neve debole"], 73: ["🌨️", "Neve"], 75: ["❄️", "Neve forte"], 77: ["🌨️", "Nevischio"], 80: ["🌦️", "Rovesci deboli"], 81: ["🌦️", "Rovesci"], 82: ["⛈️", "Rovesci forti"], 85: ["🌨️", "Rovesci di neve"], 86: ["🌨️", "Forti rovesci di neve"], 95: ["⛈️", "Temporale"], 96: ["⛈️", "Temporale con grandine"], 99: ["⛈️", "Temporale con grandine"] };
+const fWeekday = new Intl.DateTimeFormat("it-IT", { weekday: "long" });
+function wxInfo(code, day = true) { const w = WX_CODES[code] || ["🌡️", "—"]; return [!day && code <= 1 ? "🌙" : w[0], w[1]]; }
+const WX = {
+  data: null, at: 0, key: "", busy: false, err: "", tried: 0,
+  place() { const w = P().weather; return w && typeof w.lat === "number" && typeof w.lon === "number" ? w : null; },
+  keyOf(p) { return p.lat.toFixed(3) + "," + p.lon.toFixed(3); },
+  load() { try { const c = JSON.parse(lsGet("quaderno.wx") || "null"); if (c && c.data) { this.data = c.data; this.at = c.at || 0; this.key = c.key || ""; } } catch (e) {} },
+  async refresh(force) {
+    const p = this.place();
+    if (!p || this.busy) return;
+    const key = this.keyOf(p);
+    if (!force && this.key === key && this.data && Date.now() - this.at < 30 * 60000) return;
+    if (!force && Date.now() - this.tried < 60000) return;
+    this.busy = true; this.tried = Date.now();
+    try {
+      const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${p.lat}&longitude=${p.lon}&current=temperature_2m,weather_code,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=4`);
+      if (!r.ok) throw new Error("http " + r.status);
+      const j = await r.json();
+      if (!j || !j.current || !j.daily) throw new Error("dati");
+      this.data = j; this.at = Date.now(); this.key = key; this.err = "";
+      lsSet("quaderno.wx", JSON.stringify({ data: j, at: this.at, key }));
+    } catch (e) { this.err = navigator.onLine === false ? "offline" : "error"; }
+    this.busy = false;
+    if (S.ready && S.filter.type === "home") renderPage();
+  },
+  html() {
+    const p = this.place();
+    if (!p) return `<button class="wx" type="button" data-pg="wx-set" title="Scegli la città per il meteo"><span class="wx-e" aria-hidden="true">🌤️</span><span class="wx-c"><b>Meteo</b><small>Scegli la città</small></span></button>`;
+    const d = this.key === this.keyOf(p) ? this.data : null;
+    if (!d) return `<button class="wx" type="button" data-pg="wx-menu" title="Meteo di ${esc(p.name)}"><span class="wx-e" aria-hidden="true">🌡️</span><span class="wx-c"><b>${esc(p.name)}</b><small>${this.err ? "Meteo non raggiungibile" : "Carico il meteo…"}</small></span></button>`;
+    const [e, label] = wxInfo(d.current.weather_code, d.current.is_day !== 0);
+    const max = Math.round(d.daily.temperature_2m_max[0]), min = Math.round(d.daily.temperature_2m_min[0]);
+    return `<button class="wx" type="button" data-pg="wx-menu" aria-haspopup="menu" title="${esc(label)} a ${esc(p.name)} · aggiornato ${esc(relDate(this.at))}"><span class="wx-e" aria-hidden="true">${e}</span><span class="wx-t">${Math.round(d.current.temperature_2m)}°</span><span class="wx-c"><b>${esc(p.name)}</b><small>${esc(label)} · ${max}° / ${min}°</small></span></button>`;
+  },
+};
+async function chooseCity() {
+  if (S.readOnly) return;
+  const q = await ask({ title: "Città per il meteo", text: "Scrivi il nome della città, per esempio Milano. Il meteo arriva da Open-Meteo, un servizio gratuito che riceve solo la città scelta.", input: (WX.place() || {}).name || "", ok: "Cerca" });
+  if (!q) return;
+  let res;
+  try {
+    const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=8&language=it&format=json`);
+    res = ((await r.json()) || {}).results || [];
+  } catch (e) { toast(navigator.onLine === false ? "Sei offline: riprova quando c'è connessione." : "Il servizio meteo non è raggiungibile da qui."); return; }
+  if (!res.length) { toast(`Nessuna città trovata per “${q}”.`); return; }
+  let pick = res[0];
+  if (res.length > 1) {
+    const r = await dialog({ title: "Quale città?", fields: [{ name: "i", label: "Città", type: "select", value: "0", options: res.map((c, i) => ({ value: String(i), label: [c.name, c.admin1, c.country].filter(Boolean).join(", ") })) }], ok: "Scegli" });
+    if (!r) return;
+    pick = res[+r.values.i];
+  }
+  setPrefs({ weather: { name: String(pick.name).slice(0, 60), lat: +pick.latitude, lon: +pick.longitude, region: [pick.admin1, pick.country].filter(Boolean).join(", ").slice(0, 80) } });
+  WX.data = null; WX.err = ""; WX.tried = 0;
+  renderPage(true);
+  WX.refresh(true);
+}
+function wxMenu(anchor) {
+  closeMenu();
+  const pop = $("#pop"), p = WX.place() || {}, d = WX.key && p.lat !== undefined && WX.key === WX.keyOf(p) ? WX.data : null;
+  const rows = d ? d.daily.time.map((t, i) => {
+    const [e, l] = wxInfo(d.daily.weather_code[i]);
+    return `<div class="wx-row"><span>${i === 0 ? "Oggi" : i === 1 ? "Domani" : cap(fWeekday.format(parseYmd(t)))}</span><span class="wx-e" aria-hidden="true">${e}</span><span class="wx-l">${esc(l)}</span><b>${Math.round(d.daily.temperature_2m_max[i])}°</b><small>${Math.round(d.daily.temperature_2m_min[i])}°</small></div>`;
+  }).join("") : `<div class="hd" style="font-weight:400">${WX.err === "offline" ? "Sei offline: le previsioni arrivano appena torna la connessione." : WX.err ? "Il servizio meteo non è raggiungibile da qui." : "Carico le previsioni…"}</div>`;
+  pop.innerHTML = `<div class="hd">${esc(p.name || "Meteo")}${p.region ? " — " + esc(p.region) : ""}</div>${rows}<hr>`
+    + `<button type="button" data-w="refresh">${ic("i-refresh")}<span>Aggiorna il meteo</span></button>`
+    + (S.readOnly ? "" : `<button type="button" data-w="city">${ic("i-edit")}<span>Cambia città…</span></button>`)
+    + `<div class="hd" style="font-weight:400">Dati Open-Meteo${WX.at && d ? " · aggiornati " + esc(relDate(WX.at)) : ""}</div>`;
+  pop.classList.add("paper-pop");
+  placePop(anchor, { alignRight: true });
+  pop.onclick = (e) => { const b = e.target.closest("[data-w]"); if (!b) return; closeMenu(); if (b.dataset.w === "city") chooseCity(); else { WX.err = ""; WX.refresh(true); toast("Aggiorno il meteo…"); } };
+  pop.onkeydown = (e) => { if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); closeMenu(); anchor.focus(); } };
+  const f = pop.querySelector("button"); if (f) f.focus();
+  armOutside();
+}
+
+/* ---------- Outlook calendar (read-only) ----------
+   Appointments come from the Microsoft account with the separate Calendars.Read permission
+   (Cloud.Cal), are kept on the device for offline use (meta "outlook") and are never written back. */
+const OL = {
+  events: [], from: "", to: "", at: 0, state: "", busy: false, tried: 0, loaded: false,
+  get on() { return Store.mode === "cloud" && P().outlook !== false; },
+  async ensure(from, to, force) {
+    if (!this.on) return;
+    if (!this.loaded) {
+      this.loaded = true;
+      try { const c = await idb.get("meta", "outlook"); if (c && Array.isArray(c.events) && c.account === S.me) { this.events = c.events; this.from = c.from; this.to = c.to; this.at = c.at || 0; } } catch (e) {}
+    }
+    const covered = this.from && this.from <= from && this.to >= to;
+    if (this.busy) return;
+    if (!force && covered && this.state === "ok" && Date.now() - this.at < 10 * 60000) return;
+    if (!force && Date.now() - this.tried < 60000) return;
+    const t0 = todayStr();
+    const wf = [from, addDays(t0, -31)].sort()[0], wt = [to, addDays(t0, 92)].sort()[1];
+    this.busy = true; this.tried = Date.now();
+    try {
+      this.events = await Cloud.Cal.view(wf, wt);
+      this.from = wf; this.to = wt; this.at = Date.now(); this.state = "ok";
+      idb.set("meta", "outlook", { events: this.events, from: wf, to: wt, at: this.at, account: S.me }).catch(() => {});
+    } catch (e) {
+      const c = e && e.code;
+      this.state = c === "cal_consent" ? "consent" : c === "offline" ? "offline" : c === "reauth" ? "reauth" : "error";
+    }
+    this.busy = false;
+    if (S.ready && app.classList.contains("paged") && (S.filter.type === "home" || S.filter.type === "calendar")) renderPage();
+  },
+  /* Appointments touching the days [from, to). */
+  inRange(from, to) { return this.on ? this.events.filter((e) => e.date < to && (e.endDate || e.date) >= from) : []; },
+};
+function olNote() {
+  if (Store.mode !== "cloud") return `<p class="pg-note">Accedi con Microsoft per vedere qui anche gli appuntamenti del tuo calendario Outlook.</p>`;
+  if (P().outlook === false) return `<p class="pg-note">Il calendario di Outlook è nascosto. <button class="link-btn" type="button" data-pg="ol-on">Mostralo</button></p>`;
+  if (OL.state === "consent" || OL.state === "reauth") return `<p class="pg-note">Per vedere qui gli appuntamenti di Outlook serve il tuo permesso, una volta sola: Microsoft ti chiederà di consentire a Quaderno di <b>leggere</b> il calendario. <button class="btn primary" type="button" data-pg="ol-connect">${ic("i-cal", "ic sm")}Collega il calendario Outlook</button></p>`;
+  const when = OL.at ? "aggiornati " + relDate(OL.at) : "in caricamento…";
+  return `<p class="pg-note"><span class="ol-dot"></span> Appuntamenti di Outlook in sola lettura, ${esc(when)}${OL.state === "offline" ? " (sei offline: mostro l'ultima copia)" : OL.state === "error" ? " (l'ultimo aggiornamento non è riuscito)" : ""}. <button class="link-btn" type="button" data-pg="ol-refresh">Aggiorna</button></p>`;
+}
+async function showOutlookEvent(id) {
+  const e = OL.events.find((x) => x.id === id);
+  if (!e) return;
+  const multi = e.endDate && e.endDate !== e.date;
+  const when = e.allDay ? (multi ? `Dal ${dueLabel(e.date)} al ${dueLabel(e.endDate)}, tutto il giorno` : `${cap(dueLabel(e.date))}, tutto il giorno`)
+    : multi ? `Dal ${dueLabel(e.date)} ${e.time} al ${dueLabel(e.endDate)} ${e.endTime}` : `${cap(dueLabel(e.date))}, ${e.time}–${e.endTime}`;
+  const r = await dialog({ title: e.title, text: when + (e.location ? "\n" + e.location : "") + "\n\nDal tuo calendario Outlook: in Quaderno si può solo vedere.", ok: e.link ? "Apri in Outlook" : "OK", cancel: "Chiudi" });
+  if (r && e.link) openUrl(e.link);
+}
+async function connectOutlook() {
+  flushEditor();
+  toast("Ti porto alla pagina di Microsoft per il permesso…");
+  try { await Cloud.Auth.signIn({ hint: (Cloud.Auth.account || {}).username || "" }); } catch (e) { toast("Non riesco ad aprire la pagina di Microsoft adesso."); }
+}
+
+const MIC_ELSEWHERE = "Il microfono non è disponibile qui. Serve un browser recente (Edge, Chrome, Safari) e la pagina aperta in modo sicuro.";
+/* The recording is saved like any other attachment: on this device and in OneDrive (files/…). */
+async function uploadVoice(file, dur) {
+  const r = await Store.assets.upload(file);
+  return voiceChip({ od: r.path }, file.name, r.sizeBytes || file.size, dur);
+}
+/* ---------- voice notes ----------
+   A recording is an ordinary attachment marked as voice: <a class="att voice" data-dur="seconds">.
+   In the editor a click plays it in a small player bar; nothing is added to the note while it plays. */
+const VOICE_MAX = 15 * 60;
+const fmtDur = (s) => { s = Math.max(0, Math.round(+s || 0)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+function voiceMime() {
+  if (typeof MediaRecorder === "undefined") return null;
+  for (const m of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"]) { try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (e) {} }
+  return "";
+}
+function micError(e) {
+  const n = e && e.name;
+  if (n === "NotAllowedError") return "Il permesso di usare il microfono è stato negato. Puoi concederlo dalle impostazioni del browser (il lucchetto accanto all'indirizzo) e riprovare.";
+  if (n === "NotFoundError" || n === "OverconstrainedError") return "Non trovo nessun microfono collegato.";
+  if (n === "NotReadableError") return "Il microfono è già usato da un altro programma.";
+  return MIC_ELSEWHERE;
+}
+function voiceChip(src, name, size, dur) {
+  const where = src.od ? `data-od="${esc(src.od)}"` : `href="${esc(src.href)}" data-asset="${esc(src.asset)}" target="_blank" rel="noopener"`;
+  return `<a class="att voice" ${where} data-name="${esc(name)}" data-size="${+size || 0}" data-dur="${Math.round(dur)}" contenteditable="false">Nota vocale · ${fmtDur(dur)}</a>`;
+}
+async function recordVoice(target) {
+  if (S.readOnly) return;
+  if (!Store.assets) { toast("Le note vocali si salvano come allegati: sono disponibili quando le note sono salvate nel tuo account."); return; }
+  if (target === "note") { const n = ed.id && S.items.get(ed.id); if (!n || n.trashed) { toast("Apri prima una nota."); return; } }
+  const mime = voiceMime();
+  if (mime === null || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { toast(MIC_ELSEWHERE); return; }
+  closeMenu(); flushEditor();
+  const noteId = ed.id, range = target === "note" ? saveRange() : null;
+  const box = document.createElement("div");
+  box.className = "rec"; box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true"); box.setAttribute("aria-label", "Nota vocale");
+  document.body.appendChild(box);
+  let stream = null, rec = null, chunks = [], t0 = 0, timer = null, raf = 0, ctx = null, blob = null, dur = 0, url = "", busy = false;
+  const cleanup = () => {
+    clearInterval(timer); cancelAnimationFrame(raf);
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+    if (ctx) ctx.close().catch(() => {});
+    ctx = null;
+  };
+  const close = () => {
+    if (rec && rec.state !== "inactive") { rec.onstop = null; try { rec.stop(); } catch (e) {} }
+    cleanup(); if (url) URL.revokeObjectURL(url);
+    box.remove(); document.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); if (rec && rec.state === "recording") stop(); else if (!busy) close(); } };
+  document.addEventListener("keydown", onKey, true);
+  const where = target === "note" ? "Verrà inserita nella nota aperta." : "Verrà creata una nuova nota con la registrazione.";
+  const draw = (state) => {
+    if (state === "ready") box.innerHTML = `<div class="rec-box"><h2>Nota vocale</h2><div class="rec-time">0:00</div><div class="rec-level"><i></i></div><button class="rec-btn" type="button" data-r="start" aria-label="Inizia a registrare"><span class="dot"></span></button><p class="rec-hint">Premi il pulsante rosso per registrare. ${where}</p><button class="btn" type="button" data-r="cancel">Annulla</button></div>`;
+    else if (state === "rec") box.innerHTML = `<div class="rec-box"><h2>Sto registrando…</h2><div class="rec-time">0:00</div><div class="rec-level"><i></i></div><button class="rec-btn" type="button" data-r="stop" aria-label="Ferma la registrazione"><span class="sq"></span></button><p class="rec-hint">Premi il quadrato per fermare. Massimo ${VOICE_MAX / 60} minuti.</p><button class="btn" type="button" data-r="cancel">Annulla</button></div>`;
+    else box.innerHTML = `<div class="rec-box"><h2>Nota vocale · ${fmtDur(dur)}</h2><audio controls src="${url}"></audio><div class="row"><button class="btn" type="button" data-r="again">Registra di nuovo</button><button class="btn primary" type="button" data-r="save">${target === "note" ? "Inserisci nella nota" : "Crea la nota"}</button></div><button class="link-btn" type="button" data-r="cancel">Annulla</button></div>`;
+    const f = $(state === "done" ? '[data-r="save"]' : ".rec-btn", box);
+    if (f) f.focus();
+  };
+  const start = async () => {
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
+    catch (e) { close(); toast(micError(e)); return; }
+    chunks = []; blob = null;
+    if (url) { URL.revokeObjectURL(url); url = ""; }
+    try { rec = mime ? new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 48000 }) : new MediaRecorder(stream); }
+    catch (e) { try { rec = new MediaRecorder(stream); } catch (er) { close(); toast(MIC_ELSEWHERE); return; } }
+    rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+    rec.onstop = () => {
+      dur = (Date.now() - t0) / 1000;
+      blob = new Blob(chunks, { type: (rec.mimeType || mime || "audio/webm").split(";")[0] });
+      cleanup();
+      if (!blob.size) { close(); toast("La registrazione è vuota: riprova."); return; }
+      url = URL.createObjectURL(blob);
+      draw("done");
+    };
+    rec.start(1000); t0 = Date.now();
+    draw("rec"); box.classList.add("on");
+    timer = setInterval(() => { const s = (Date.now() - t0) / 1000, el = $(".rec-time", box); if (el) el.textContent = fmtDur(s); if (s >= VOICE_MAX) stop(); }, 250);
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      ctx = new AC();
+      const an = ctx.createAnalyser(); an.fftSize = 512;
+      ctx.createMediaStreamSource(stream).connect(an);
+      const buf = new Uint8Array(an.fftSize);
+      const tick = () => { an.getByteTimeDomainData(buf); let peak = 0; for (const v of buf) peak = Math.max(peak, Math.abs(v - 128)); const bar = $(".rec-level i", box); if (bar) bar.style.width = Math.min(100, (peak / 64) * 100) + "%"; raf = requestAnimationFrame(tick); };
+      tick();
+    } catch (e) {}
+  };
+  const stop = () => { box.classList.remove("on"); if (rec && rec.state !== "inactive") rec.stop(); };
+  const save = async () => {
+    if (!blob || busy) return;
+    busy = true;
+    const type = blob.type || "audio/webm", ext = /mp4|m4a|aac/.test(type) ? "m4a" : /ogg/.test(type) ? "ogg" : "webm";
+    const now = new Date(), name = `Nota vocale ${ymd(now)} ${hm(now).replace(":", ".")}.${ext}`;
+    const okBtn = $('[data-r="save"]', box);
+    if (okBtn) { okBtn.disabled = true; okBtn.textContent = "Salvo…"; }
+    let snip;
+    try { snip = await uploadVoice(new File([blob], name, { type }), dur); }
+    catch (e) {
+      busy = false;
+      toast(e && e.code === "quota_exceeded" ? "Spazio esaurito: non riesco a salvare la nota vocale." : "Non riesco a salvare la nota vocale: riprova.");
+      if (okBtn) { okBtn.disabled = false; okBtn.textContent = "Riprova"; }
+      return;
+    }
+    close();
+    if (target === "note") {
+      if (ed.id !== noteId) goNote(noteId);
+      if (range && edBody.contains(range.commonAncestorContainer)) restoreRange(range); else restoreRange(null);
+      exec("insertHTML", snip + "&nbsp;");
+      scheduleSave();
+      toast("Nota vocale inserita");
+    } else {
+      newNote({ title: "Nota vocale del " + fFull.format(now) + ", " + hm(now), html: `<p>${snip}</p><p><br></p>` });
+      toast("Nota vocale creata");
+    }
+  };
+  box.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-r]");
+    if (!b) { if (e.target === box && !(rec && rec.state === "recording") && !busy) close(); return; }
+    const r = b.dataset.r;
+    if (r === "start" || r === "again") start();
+    else if (r === "stop") stop();
+    else if (r === "save") save();
+    else if (r === "cancel" && !busy) close();
+  });
+  draw("ready");
+}
+
+/* Player bar for voice notes (the note itself is never changed while it plays). */
+const VP = { audio: null, key: "", bar: null, dur: 0 };
+const voiceKey = (el) => el.dataset.od || el.dataset.asset || el.getAttribute("href") || "";
+async function voiceSrc(el) { return el.dataset.od && typeof Files !== "undefined" ? Files.url(el.dataset.od) : el.getAttribute("href"); }
+function markVoice() {
+  let st = $("#vpStyle");
+  if (!st) { st = document.createElement("style"); st.id = "vpStyle"; document.head.appendChild(st); }
+  const k = VP.audio && !VP.audio.paused ? CSS.escape(VP.key) : "";
+  st.textContent = k ? `.ed-body a.att.voice[data-od="${k}"], .ed-body a.att.voice[data-asset="${k}"], .ed-body a.att.voice[href="${k}"] { box-shadow: 0 0 0 2px var(--accent); }` : "";
+}
+async function playVoice(el) {
+  const key = voiceKey(el);
+  if (VP.audio && VP.key === key) { if (VP.audio.paused) VP.audio.play().catch(() => {}); else VP.audio.pause(); return; }
+  stopVoice();
+  let src = null;
+  try { src = await voiceSrc(el); } catch (e) {}
+  if (!src) { toast("Non riesco a caricare la nota vocale."); return; }
+  const a = new Audio(src);
+  VP.audio = a; VP.key = key; VP.dur = +el.dataset.dur || 0;
+  const bar = document.createElement("div");
+  bar.className = "voice-bar"; bar.setAttribute("role", "group"); bar.setAttribute("aria-label", "Nota vocale");
+  bar.innerHTML = `<button type="button" data-v="toggle" aria-label="Pausa">⏸</button><span class="vb-n">🎤</span><input type="range" min="0" max="1000" value="0" aria-label="Posizione nella nota vocale"><span class="vb-t">0:00 / ${fmtDur(VP.dur)}</span><button type="button" class="vb-x" data-v="close" aria-label="Chiudi il lettore">✕</button>`;
+  document.body.appendChild(bar);
+  VP.bar = bar;
+  const rng = $("input", bar), tt = $(".vb-t", bar), tb = $('[data-v="toggle"]', bar);
+  const total = () => (isFinite(a.duration) && a.duration > 0 ? a.duration : VP.dur) || 0;
+  a.ontimeupdate = () => { const T = total(); if (document.activeElement !== rng) rng.value = T ? Math.round((a.currentTime / T) * 1000) : 0; tt.textContent = fmtDur(a.currentTime) + " / " + fmtDur(T); };
+  a.onplay = () => { tb.textContent = "⏸"; tb.setAttribute("aria-label", "Pausa"); markVoice(); };
+  a.onpause = () => { tb.textContent = "▶"; tb.setAttribute("aria-label", "Riproduci"); markVoice(); };
+  a.onended = () => { try { a.currentTime = 0; } catch (e) {} };
+  a.onerror = () => { toast("Non riesco a riprodurre la nota vocale su questo dispositivo."); stopVoice(); };
+  rng.oninput = () => { const T = total(); if (T) { try { a.currentTime = (rng.value / 1000) * T; } catch (e) {} } };
+  bar.onclick = (e) => { const b = e.target.closest("[data-v]"); if (!b) return; if (b.dataset.v === "close") stopVoice(); else if (a.paused) a.play().catch(() => {}); else a.pause(); };
+  a.play().catch(() => {});
+}
+function stopVoice() {
+  if (VP.audio) { VP.audio.pause(); VP.audio.removeAttribute("src"); }
+  VP.audio = null; VP.key = "";
+  if (VP.bar) VP.bar.remove();
+  VP.bar = null;
+  markVoice();
 }
 
 /* ---------- share ---------- */
@@ -1782,6 +2209,7 @@ function handleAction(b) {
   if (d.taskToggle) { toggleTask(d.taskToggle); return true; }
   if (d.taskEdit) { editTask(d.taskEdit); return true; }
   if (d.ev) { editEvent(d.ev); return true; }
+  if (d.ol) { showOutlookEvent(d.ol); return true; }
   if (d.cl) { const [id, i] = d.cl.split("|"); toggleChecklistItem(id, +i); return true; }
   if (d.remDone) { toggleReminderDone(d.remDone); return true; }
   if (d.rem) { setReminder(d.rem); return true; }
@@ -2056,7 +2484,7 @@ function sanitize(html, rich) {
       }
       [...c.attributes].forEach((a) => {
         if (t === "A" && a.name === "href" && /^(https?:|mailto:)/i.test(a.value.trim())) return;
-        if (richAtt && ((a.name === "href" && /^https:/i.test(a.value.trim())) || (a.name === "data-od" && odOk) || ["class", "data-asset", "data-name", "data-size", "contenteditable"].includes(a.name))) return;
+        if (richAtt && ((a.name === "href" && /^https:/i.test(a.value.trim())) || (a.name === "data-od" && odOk) || ["class", "data-asset", "data-name", "data-size", "data-dur", "contenteditable"].includes(a.name))) return;
         if (richImg && ((a.name === "src" && !odOk && /^https:/i.test(a.value.trim())) || (a.name === "data-od" && odOk) || a.name === "data-asset" || a.name === "alt")) return;
         if (rich && t === "UL" && a.name === "data-type" && a.value === "checklist") return;
         if (rich && t === "LI" && a.name === "data-checked") return;
@@ -2346,6 +2774,7 @@ async function noteBody(html, mapEl) {
     let url = null;
     try { url = await mapEl(el); } catch (e) { url = null; }
     if (url) el.setAttribute(el.tagName === "IMG" ? "src" : "href", url);
+    if (el.classList.contains("voice") && el.getAttribute("href")) { const au = document.createElement("audio"); au.controls = true; au.preload = "none"; au.src = el.getAttribute("href"); el.before(au); }
     if (el.tagName === "A" && el.dataset.name) el.setAttribute("download", el.dataset.name);
     ["data-asset", "data-od", "data-size", "contenteditable"].forEach((a) => el.removeAttribute(a));
   }
@@ -2732,6 +3161,11 @@ pagePane.addEventListener("click", (e) => {
   if (b) {
     const d = b.dataset;
     if (d.pg === "menu") return openDrawer();
+    if (d.pg === "wx-set") return chooseCity();
+    if (d.pg === "ol-connect") return connectOutlook();
+    if (d.pg === "ol-refresh") { OL.state = OL.state === "ok" ? "ok" : ""; OL.ensure(todayStr(), addDays(todayStr(), 14), true); toast("Aggiorno il calendario di Outlook…"); return; }
+    if (d.pg === "ol-on") { setPrefs({ outlook: true }); renderPage(true); return; }
+    if (d.pg === "wx-menu") return wxMenu(b);
     if (d.grip) return; // dragging is handled by the pointer events below
     if (d.untile) { setHome(homeIds().filter((x) => x !== d.untile)); toast("Tolta dalla Home: la nota resta in Note."); return; }
     if (d.pg === "home-add") return homeAdd();
@@ -2882,6 +3316,8 @@ edBody.addEventListener("click", (e) => {
     const r = li.getBoundingClientRect();
     if (e.clientX - r.left < 26) { li.dataset.checked = li.dataset.checked === "true" ? "false" : "true"; scheduleSave(); e.preventDefault(); return; }
   }
+  const vc = e.target.closest("a.att.voice");
+  if (vc) { e.preventDefault(); playVoice(vc); return; }
   const nl = e.target.closest("a[data-note]");
   if (nl) { e.preventDefault(); flushEditor(); goNote(nl.dataset.note); return; }
   const att = e.target.closest("a.att");
@@ -2936,6 +3372,7 @@ $("#edNotebook").addEventListener("change", (e) => moveNote(ed.id, e.target.valu
 $("#btnStar").onclick = () => { const n = S.items.get(ed.id); if (n) patchNote(ed.id, { pinned: !n.pinned }, false); };
 $("#btnNoteMore").onclick = (e) => noteMenu(e.currentTarget);
 $("#btnPaper").onclick = (e) => paperMenu(e.currentTarget);
+$("#btnRefresh").onclick = (e) => { e.stopPropagation(); refreshApp(); };
 $("#btnShare").onclick = (e) => shareMenu(e.currentTarget);
 $("#btnOneDrive").onclick = saveToOneDrive;
 $("#btnBell").onclick = () => { if (ed.id) setReminder(ed.id); };
@@ -3032,6 +3469,9 @@ setInterval(checkReminders, 30000);
 setTimeout(checkReminders, 4000);
 try { document.execCommand("defaultParagraphSeparator", false, "p"); document.execCommand("styleWithCSS", false, false); } catch (e) {}
 updateImageTool();
+injectPalettes();
+WX.load();
+applyPalette(PALETTES[lsGet("quaderno.palette")] ? lsGet("quaderno.palette") : ""); // last colours used on this device, until the notes load
 
 /* sign-in screen, sync status, installable app */
 $("#btnSignIn").onclick = connectOneDrive;
