@@ -26,6 +26,9 @@
   --f-ui: "Instrument Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
   --f-page: "Newsreader", Georgia, "Times New Roman", serif;
   --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  --pp-yellow: #fff7d1; --pp-green: #e6f5e8; --pp-blue: #e5effb; --pp-pink: #fde8ee; --pp-purple: #efe9fb; --pp-orange: #fdeedc; --pp-gray: #eef0f3;
+  --pp-line: rgba(47, 84, 212, .17);
+  --share: #1d4ed8; --share-fg: #ffffff;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -35,6 +38,9 @@
     --c-red: #fc8181; --c-orange: #f6ad55; --c-green: #68d391; --c-blue: #63b3ed; --c-purple: #b794f4; --c-gray: #a0aec0;
     --side: #0d1016; --side-fg: #cfd5e0; --side-muted: #7c859a; --side-hover: #191e28; --side-active: #222b40;
     --shadow: 0 10px 30px rgba(0, 0, 0, .5);
+    --pp-yellow: #2b2714; --pp-green: #172a1d; --pp-blue: #15233a; --pp-pink: #301b25; --pp-purple: #241d39; --pp-orange: #2f2316; --pp-gray: #22262e;
+    --pp-line: rgba(132, 160, 255, .17);
+    --share: #2563eb; --share-fg: #ffffff;
     color-scheme: dark;
   }
 }
@@ -45,6 +51,9 @@
     --c-red: #fc8181; --c-orange: #f6ad55; --c-green: #68d391; --c-blue: #63b3ed; --c-purple: #b794f4; --c-gray: #a0aec0;
   --side: #0d1016; --side-fg: #cfd5e0; --side-muted: #7c859a; --side-hover: #191e28; --side-active: #222b40;
   --shadow: 0 10px 30px rgba(0, 0, 0, .5);
+  --pp-yellow: #2b2714; --pp-green: #172a1d; --pp-blue: #15233a; --pp-pink: #301b25; --pp-purple: #241d39; --pp-orange: #2f2316; --pp-gray: #22262e;
+  --pp-line: rgba(132, 160, 255, .17);
+  --share: #2563eb; --share-fg: #ffffff;
   color-scheme: dark;
 }
 
@@ -262,6 +271,46 @@ kbd { font-family: var(--f-mono); font-size: 11.5px; background: var(--chip); bo
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ev.rem { background: #3a2f12; color: #f0c24a; } }
 .ed-foot { display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
+/* ---------- Page background (per note): colour + plain / grid / wide lines / narrow lines ---------- */
+.paperbg { --paper: var(--surface); background-color: var(--paper); }
+.pp-yellow { --paper: var(--pp-yellow); } .pp-green { --paper: var(--pp-green); } .pp-blue { --paper: var(--pp-blue); } .pp-pink { --paper: var(--pp-pink); }
+.pp-purple { --paper: var(--pp-purple); } .pp-orange { --paper: var(--pp-orange); } .pp-gray { --paper: var(--pp-gray); }
+.paperbg[data-paper="grid"] { background-image: linear-gradient(var(--pp-line) 1px, transparent 1px), linear-gradient(90deg, var(--pp-line) 1px, transparent 1px); background-size: 24px 24px; }
+.paperbg[data-paper="lines"] { background-image: linear-gradient(transparent calc(100% - 1px), var(--pp-line) 0); background-size: 100% 36px; }
+.paperbg[data-paper="lines-tight"] { background-image: linear-gradient(transparent calc(100% - 1px), var(--pp-line) 0); background-size: 100% 22px; }
+.ed-scroll.paperbg { background-attachment: local; }
+.pop.paper-pop { min-width: 270px; max-width: 300px; }
+.pop .pp-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 8px 10px; }
+.pop .pp-sw { width: 30px; height: 30px; padding: 0; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); flex: none; }
+.pop .pp-sw[aria-pressed="true"], .pop .pp-st[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pop .pp-st { flex-direction: column; align-items: stretch; gap: 4px; width: calc(50% - 3px); padding: 6px; font-size: 12px; border: 1px solid var(--line); }
+.pop .pp-st .pv { height: 38px; border-radius: 6px; border: 1px solid var(--line); }
+.card-title .ppdot { width: 10px; height: 10px; border-radius: 3px; background: var(--paper); border: 1px solid var(--line); flex: none; }
+.mini.paperbg { background-color: var(--paper); }
+.mini.paperbg:not(.pp-yellow):not(.pp-green):not(.pp-blue):not(.pp-pink):not(.pp-purple):not(.pp-orange):not(.pp-gray) { --paper: var(--bg); }
+
+/* ---------- Share button (blue, top right of every note) ---------- */
+.share-btn { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 9px; padding: 7px 14px; margin-left: 4px; background: var(--share); color: var(--share-fg); font-weight: 600; font-size: 13.5px; flex: none; }
+.share-btn:hover { filter: brightness(1.1); }
+.share-btn .ic { width: 16px; height: 16px; }
+.share-btn:disabled { opacity: .5; filter: none; }
+
+/* ---------- Home: resizable box of note tiles, removable and draggable ---------- */
+.mini-box { resize: both; overflow: auto; max-width: 100%; min-height: 150px; min-width: 200px; padding: 2px; border-radius: 10px; }
+.mini-box.sized { border: 1px dashed var(--line); padding: 8px; }
+.tile { position: relative; min-width: 0; display: flex; }
+.tile .mini { width: 100%; }
+.tile .mini b { padding-right: 56px; }
+.tile-x, .tile-grip { position: absolute; top: 6px; width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); display: grid; place-items: center; padding: 0; opacity: 0; font-size: 15px; line-height: 1; }
+.tile-x { right: 6px; }
+.tile-grip { right: 34px; cursor: grab; touch-action: none; }
+.tile-x:hover, .tile-grip:hover { color: var(--fg); border-color: var(--muted); }
+.tile:hover .tile-x, .tile:hover .tile-grip, .tile:focus-within .tile-x, .tile:focus-within .tile-grip { opacity: 1; }
+@media (hover: none) { .tile-x, .tile-grip { opacity: 1; } }
+.tile.dragging { opacity: .55; }
+.tile.dragging .tile-grip { cursor: grabbing; }
+.w > header .acts-h { display: flex; gap: 2px; flex-wrap: wrap; }
+
 /* ---------- Page views ---------- */
 .pagepane { grid-column: 2 / -1; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface); overflow-y: auto; }
 .app.paged .list, .app.paged .editor { display: none !important; }
@@ -419,6 +468,12 @@ button.grp-h[aria-expanded="false"] .ic { transform: rotate(-90deg); }
   .save-state { display: none; }
   .ed-top { gap: 2px; padding: 8px 10px; }
   .nb-pick select { max-width: 120px; }
+  .share-btn { padding: 7px 9px; }
+  .share-btn span { display: none; }
+  .ed-top { flex-wrap: nowrap; }
+  .nb-pick { flex: 0 1 auto; }
+  .nb-pick select { min-width: 0; width: 100%; max-width: 110px; }
+  #btnStar, #btnOneDrive, #btnAI { display: none; }
   .list { border-right: 0; }
   .list-head { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
   .ed-scroll { padding-top: 18px; }

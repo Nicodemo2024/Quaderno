@@ -7,6 +7,7 @@ const MAX_DOC = 3500000;                 // one OneDrive file per note (simple u
 const MAX_FILE = 100 * 1024 * 1024;
 
 const S = { items: new Map(), filter: { type: "all" }, query: "", sort: "updated", activeId: null, readOnly: false, ready: false, me: null, myName: "", names: {}, cal: null, filesKind: "all", pageStale: false };
+let drag = null; // Home tile being dragged
 
 /* ---------- helpers ---------- */
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -134,6 +135,20 @@ function openMenu(anchor, items, opts = {}) {
   const pop = $("#pop");
   pop.innerHTML = items.map((it, i) => it === "-" ? "<hr>" : it.head ? `<div class="hd">${esc(it.head)}</div>` :
     `<button type="button" role="menuitem" data-i="${i}"${it.danger ? ' class="danger"' : ""}${it.disabled ? " disabled" : ""}>${it.swatch ? `<span class="sw ${it.swatch}"></span>` : it.icon ? ic(it.icon) : ""}<span>${esc(it.label)}</span>${it.k ? `<span class="k">${esc(it.k)}</span>` : ""}</button>`).join("");
+  placePop(anchor, opts);
+  const first = pop.querySelector("button:not([disabled])");
+  if (first) first.focus();
+  pop.onclick = (e) => { const b = e.target.closest("[data-i]"); if (!b || b.disabled) return; const it = items[+b.dataset.i]; closeMenu(); if (it.action) it.action(); };
+  pop.onkeydown = (e) => {
+    const bs = $$("button:not([disabled])", pop), k = bs.indexOf(document.activeElement);
+    if (e.key === "ArrowDown") { e.preventDefault(); bs[(k + 1) % bs.length].focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); bs[(k - 1 + bs.length) % bs.length].focus(); }
+    else if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); closeMenu(); if (anchor instanceof Element) anchor.focus(); }
+  };
+  armOutside();
+}
+function placePop(anchor, opts = {}) {
+  const pop = $("#pop");
   pop.hidden = false;
   let x, y;
   if (anchor instanceof Element) {
@@ -144,20 +159,14 @@ function openMenu(anchor, items, opts = {}) {
   } else { x = anchor.x; y = anchor.y; if (y + pop.offsetHeight > innerHeight - 8) y = innerHeight - pop.offsetHeight - 8; }
   pop.style.left = Math.max(8, Math.min(x, innerWidth - pop.offsetWidth - 8)) + "px";
   pop.style.top = Math.max(8, y) + "px";
-  const first = pop.querySelector("button:not([disabled])");
-  if (first) first.focus();
-  pop.onclick = (e) => { const b = e.target.closest("[data-i]"); if (!b || b.disabled) return; const it = items[+b.dataset.i]; closeMenu(); if (it.action) it.action(); };
-  pop.onkeydown = (e) => {
-    const bs = $$("button:not([disabled])", pop), k = bs.indexOf(document.activeElement);
-    if (e.key === "ArrowDown") { e.preventDefault(); bs[(k + 1) % bs.length].focus(); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); bs[(k - 1 + bs.length) % bs.length].focus(); }
-    else if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); closeMenu(); if (anchor instanceof Element) anchor.focus(); }
-  };
+}
+function armOutside() {
+  const pop = $("#pop");
   const out = (e) => { if (!pop.contains(e.target)) closeMenu(); };
   setTimeout(() => document.addEventListener("mousedown", out, true), 0);
   popOff = () => document.removeEventListener("mousedown", out, true);
 }
-function closeMenu() { const pop = $("#pop"); if (pop.hidden) return; pop.hidden = true; if (popOff) { popOff(); popOff = null; } }
+function closeMenu() { const pop = $("#pop"); if (pop.hidden) return; pop.hidden = true; pop.classList.remove("paper-pop"); if (popOff) { popOff(); popOff = null; } }
 
 /* ---------- storage ----------
    Every note, notebook, task, event and preference is one record. The copy on this device (IndexedDB)
@@ -793,7 +802,7 @@ function renderList() {
     const thumb = imgTag(p.img && p.img.src, "thumb");
     return `<button class="card${n.id === S.activeId ? " active" : ""}" type="button" data-id="${esc(n.id)}">
       <span class="card-main">
-        <span class="card-title">${n.pinned ? ic("i-star") : ""}<span>${esc(n.title || "Senza titolo")}</span></span>
+        <span class="card-title">${paperColor(n) ? `<span class="ppdot pp-${paperColor(n)}" title="Sfondo colorato"></span>` : ""}${n.pinned ? ic("i-star") : ""}<span>${esc(n.title || "Senza titolo")}</span></span>
         <span class="card-snip">${esc(p.text.slice(0, 220)) || "<em>Nessun contenuto</em>"}</span>
         <span class="card-meta">${meta.join("")}</span>
       </span>${thumb}</button>`;
@@ -905,6 +914,8 @@ function renderEditorMeta() {
   edTitle.readOnly = locked;
   edBody.contentEditable = locked ? "false" : "true";
   $("#toolbar").setAttribute("aria-disabled", locked ? "true" : "false");
+  applyPaper($("#edScroll"), n);
+  $("#btnPaper").disabled = locked;
   $("#tagInput").hidden = locked;
   $("#tagChips").innerHTML = (n.tags || []).map((t, i) => `<span class="tag-chip">${esc(t)}${locked ? "" : `<button type="button" data-rmtag="${i}" aria-label="Rimuovi tag ${esc(t)}">×</button>`}</span>`).join("");
   const lt = tasks().filter((t) => t.noteId === ed.id).sort(byDue), le = events().filter((e) => e.noteId === ed.id).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
@@ -1042,11 +1053,11 @@ async function newFromTemplate(preset) {
     if (!r) return;
     v = r.values.tpl;
   }
-  let title = "", html = "", tags = [];
-  if (v.startsWith("u:")) { const t = S.items.get(v.slice(2)); if (!t) return; title = t.title || ""; html = t.html || ""; tags = [...(t.tags || [])]; }
+  let title = "", html = "", tags = [], look = {};
+  if (v.startsWith("u:")) { const t = S.items.get(v.slice(2)); if (!t) return; title = t.title || ""; html = t.html || ""; tags = [...(t.tags || [])]; look = { paper: paperStyle(t), paperColor: paperColor(t) }; }
   else { const t = BUILTIN_TPL[+v.slice(2)]; if (!t) return; title = t.noteTitle(); html = t.html; }
   if (S.filter.type === "templates") S.filter = { type: "all" };
-  newNote({ title, html, ...(tags.length ? { tags } : {}), isTemplate: false });
+  newNote({ title, html, ...(tags.length ? { tags } : {}), ...look, isTemplate: false });
 }
 
 /* ---------- tasks & events ---------- */
@@ -1451,8 +1462,8 @@ function pgHead(title, acts = "", eyebrow = "") {
   return `<div class="pg-head"><button class="icon-btn menu-btn" type="button" data-pg="menu" aria-label="Apri il menu">${ic("i-menu")}</button><div class="ttl">${eyebrow ? `<div class="eyebrow">${esc(eyebrow)}</div>` : ""}<h1>${esc(title)}</h1></div>${acts ? `<div class="acts">${acts}</div>` : ""}</div>`;
 }
 function miniCard(n) {
-  const p = parsed(n.id, n.html);
-  return `<button class="mini" type="button" data-note="${esc(n.id)}"><b>${esc(n.title || "Senza titolo")}</b><span>${esc(p.text.slice(0, 160)) || "Nessun contenuto"}</span><small>${esc(relDate(n.updatedAt))}${containerName(n) ? " · " + esc(containerName(n)) : ""}</small></button>`;
+  const p = parsed(n.id, n.html), pa = paperAttrs(n);
+  return `<button class="mini${pa.cls}"${pa.attr} type="button" data-note="${esc(n.id)}"><b>${esc(n.title || "Senza titolo")}</b><span>${esc(p.text.slice(0, 160)) || "Nessun contenuto"}</span><small>${esc(relDate(n.updatedAt))}${containerName(n) ? " · " + esc(containerName(n)) : ""}</small></button>`;
 }
 function taskRow(t) {
   const n = t.noteId && S.items.get(t.noteId);
@@ -1465,9 +1476,15 @@ function agendaRow(x) {
 function pageHome() {
   const hr = new Date().getHours();
   const greet = (hr < 13 ? "Buongiorno" : hr < 18 ? "Buon pomeriggio" : "Buonasera") + (S.myName ? ", " + S.myName.split(" ")[0] : "");
-  const recent = liveNotes().sort(byUpdated).slice(0, 7);
   const ro = S.readOnly;
-  const notesW = `<section class="w wide"><header><h2>Note recenti</h2><button class="link-btn" type="button" data-go="all">Vedi tutte</button></header><div class="mini-notes">${ro ? "" : `<button class="mini new" type="button" data-pg="new-note">${ic("i-plus")}Nuova nota</button>`}${recent.map(miniCard).join("")}</div>${!recent.length ? `<div class="empty-s">Ancora nessuna nota.</div>` : ""}</section>`;
+  const custom = Array.isArray(P().homeNotes), box = P().homeBox;
+  const homeNotes = homeIds().map((id) => ({ id, ...S.items.get(id) }));
+  const boxStyle = box && (box.h || box.w) ? ` style="${box.h ? "height:" + Math.round(box.h) + "px;" : ""}${box.w ? "width:" + Math.round(box.w) + "px" : ""}"` : "";
+  const hActs = (ro ? "" : `<button class="link-btn" type="button" data-pg="home-add">${ic("i-plus", "ic sm")}Aggiungi</button>`)
+    + (!ro && custom ? `<button class="link-btn" type="button" data-pg="home-reset" title="Torna a mostrare le note modificate più di recente">Più recenti</button>` : "")
+    + (!ro && box ? `<button class="link-btn" type="button" data-pg="home-autosize" title="Torna alla misura automatica">Misura automatica</button>` : "")
+    + `<button class="link-btn" type="button" data-go="all">Vedi tutte</button>`;
+  const notesW = `<section class="w wide"><header><h2>${custom ? "Note in Home" : "Note recenti"}</h2><span class="acts-h">${hActs}</span></header><div class="mini-box mini-notes${box ? " sized" : ""}" id="miniBox"${boxStyle}>${ro ? "" : `<button class="mini new" type="button" data-pg="new-note">${ic("i-plus")}Nuova nota</button>`}${homeNotes.map((n) => tileCard(n, ro)).join("")}</div>${!homeNotes.length ? `<div class="empty-s">${custom ? "Hai tolto tutte le note dalla Home: usa Aggiungi per rimetterne." : "Ancora nessuna nota."}</div>` : ""}${ro ? "" : `<p class="pg-note">Trascina ⠿ per spostare un riquadro, × per toglierlo dalla Home (la nota resta). Per cambiare la misura del riquadro trascinane l'angolo in basso a destra.</p>`}</section>`;
   const open = tasks().filter((x) => !x.done).sort(byDue).slice(0, 7);
   const tasksW = `<section class="w"><header><h2>Attività</h2><button class="link-btn" type="button" data-go="tasks">Apri</button></header>${ro ? "" : `<form class="add-row" data-form="quick-task"><input class="field" name="t" type="text" placeholder="Aggiungi un'attività e premi Invio" autocomplete="off" aria-label="Nuova attività"></form>`}<div class="rows">${open.length ? open.map(taskRow).join("") : `<div class="empty-s">Nessuna attività da fare.</div>`}</div></section>`;
   const up = agenda(todayStr(), 14).slice(0, 7);
@@ -1565,17 +1582,198 @@ function pageSpaces() {
 }
 
 function renderPage(force) {
-  if (!S.ready || !app.classList.contains("paged")) return;
+  if (!S.ready || !app.classList.contains("paged") || drag) return;
   const a = document.activeElement;
   if (!force && pagePane.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) { S.pageStale = true; return; }
   S.pageStale = false;
   const t = S.filter.type;
   if ((t === "spaces") && !sharedOn()) { S.filter = { type: "all" }; showView(); return; }
   const top = pagePane.scrollTop;
+  let refocus = null; // keep keyboard focus on the same control across a re-render
+  if (a && a !== pagePane && pagePane.contains(a) && a.dataset) {
+    const k = ["grip", "untile", "note", "pg", "go", "taskToggle", "taskEdit", "ev", "cal", "fk"].find((x) => a.dataset[x]);
+    if (k) refocus = `[data-${k.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase())}="${CSS.escape(a.dataset[k])}"]`;
+  }
   const h = t === "home" ? pageHome() : t === "tasks" ? pageTasks() : t === "calendar" ? pageCalendar() : t === "files" ? pageFiles() : t === "notebooks" ? pageNotebooks() : t === "tags" ? pageTags() : pageSpaces();
   pagePane.innerHTML = `<div class="pg">${h}</div>`;
   hydrate(pagePane, true);
   pagePane.scrollTop = top;
+  if (refocus) { const el = $(refocus, pagePane); if (el) el.focus({ preventScroll: true }); }
+  if (t === "home") watchHomeBox();
+}
+
+/* ---------- Home: note tiles chosen by the user (prefs.homeNotes), resizable box (prefs.homeBox) ---------- */
+function homeIds() {
+  const live = liveNotes(), ok = new Set(live.map((n) => n.id)), p = P().homeNotes;
+  if (Array.isArray(p)) return p.filter((id) => ok.has(id));
+  return live.sort(byUpdated).slice(0, 8).map((n) => n.id);
+}
+function setHome(ids) { setPrefs({ homeNotes: [...new Set(ids)].slice(0, 80) }); renderPage(true); }
+function tileCard(n, ro) {
+  const t = esc(n.title || "Senza titolo");
+  return `<div class="tile" data-tile="${esc(n.id)}">${miniCard(n)}${ro ? "" : `<button class="tile-grip" type="button" data-grip="${esc(n.id)}" aria-label="Sposta “${t}”: trascina o usa le frecce" title="Trascina per spostare">⠿</button><button class="tile-x" type="button" data-untile="${esc(n.id)}" aria-label="Togli “${t}” dalla Home" title="Togli dalla Home">×</button>`}</div>`;
+}
+async function homeAdd() {
+  const cur = new Set(homeIds());
+  const opts = liveNotes().filter((n) => !cur.has(n.id)).sort(byUpdated).slice(0, 400).map((n) => ({ value: n.id, label: (n.title || "Senza titolo").slice(0, 70) + (containerName(n) ? " — " + containerName(n).slice(0, 30) : "") }));
+  if (!opts.length) { toast("Tutte le note sono già nella Home."); return; }
+  const r = await dialog({ title: "Aggiungi una nota alla Home", fields: [{ name: "id", label: "Nota", type: "select", value: opts[0].value, options: opts }], ok: "Aggiungi" });
+  if (r) setHome([...homeIds(), r.values.id]);
+}
+let boxObs = null, boxTimer = null;
+function watchHomeBox() {
+  if (boxObs) { boxObs.disconnect(); boxObs = null; }
+  const el = $("#miniBox", pagePane);
+  if (!el || S.readOnly || typeof ResizeObserver !== "function") return;
+  boxObs = new ResizeObserver(() => {
+    if (!el.style.height && !el.style.width) return; // only a size the user set by dragging the corner
+    clearTimeout(boxTimer);
+    boxTimer = setTimeout(() => {
+      const w = Math.round(parseFloat(el.style.width) || 0), h = Math.round(parseFloat(el.style.height) || 0), cur = P().homeBox || {};
+      if ((cur.w || 0) === w && (cur.h || 0) === h) return;
+      setPrefs({ homeBox: { w, h } });
+      el.classList.add("sized");
+    }, 600);
+  });
+  boxObs.observe(el);
+}
+
+/* ---------- page background ---------- */
+const PAPER_COLORS = [["", "Bianco"], ["yellow", "Giallo"], ["green", "Verde"], ["blue", "Azzurro"], ["pink", "Rosa"], ["purple", "Lilla"], ["orange", "Pesca"], ["gray", "Grigio"]];
+const PAPER_STYLES = [["", "Liscio"], ["grid", "Quadretti"], ["lines", "Righe larghe"], ["lines-tight", "Righe strette"]];
+const PAPER_HEX = { yellow: "#fff7d1", green: "#e6f5e8", blue: "#e5effb", pink: "#fde8ee", purple: "#efe9fb", orange: "#fdeedc", gray: "#eef0f3" };
+const paperColor = (n) => (n && PAPER_HEX[n.paperColor] ? n.paperColor : "");
+const paperStyle = (n) => (n && PAPER_STYLES.some((s) => s[0] && s[0] === n.paper) ? n.paper : "");
+function applyPaper(el, n) {
+  [...el.classList].forEach((c) => { if (c.startsWith("pp-")) el.classList.remove(c); });
+  const c = paperColor(n), s = paperStyle(n);
+  if (c) el.classList.add("pp-" + c);
+  if (s) el.dataset.paper = s; else delete el.dataset.paper;
+}
+function paperAttrs(n) {
+  const c = paperColor(n), s = paperStyle(n);
+  return c || s ? { cls: " paperbg" + (c ? " pp-" + c : ""), attr: s ? ` data-paper="${s}"` : "" } : { cls: "", attr: "" };
+}
+function paperCss(n) {
+  const c = paperColor(n), s = paperStyle(n), line = "rgba(47,84,212,.17)";
+  if (!c && !s) return "";
+  let css = "background-color:" + (c ? PAPER_HEX[c] : "#fff") + ";";
+  if (s === "grid") css += `background-image:linear-gradient(${line} 1px,transparent 1px),linear-gradient(90deg,${line} 1px,transparent 1px);background-size:24px 24px;`;
+  else if (s) css += `background-image:linear-gradient(transparent calc(100% - 1px),${line} 0);background-size:100% ${s === "lines" ? 36 : 22}px;`;
+  return `html{${css}color-scheme:light}body{background:transparent!important;color:#1a1f29!important}`;
+}
+function paperMenu(anchor) {
+  const n = S.items.get(ed.id);
+  if (!n || S.readOnly || n.trashed) return;
+  closeMenu();
+  const pop = $("#pop");
+  const draw = () => {
+    const cur = S.items.get(ed.id) || n, c = paperColor(cur), s = paperStyle(cur);
+    pop.innerHTML = `<div class="hd">Colore della pagina</div><div class="pp-row">${PAPER_COLORS.map(([k, l]) => `<button type="button" class="pp-sw paperbg${k ? " pp-" + k : ""}" data-pc="${k}" aria-pressed="${c === k}" title="${l}" aria-label="${l}"></button>`).join("")}</div>`
+      + `<div class="hd">Stile della pagina</div><div class="pp-row">${PAPER_STYLES.map(([k, l]) => `<button type="button" class="pp-st" data-ps="${k}" aria-pressed="${s === k}"><span class="pv paperbg${c ? " pp-" + c : ""}"${k ? ` data-paper="${k}"` : ""}></span>${l}</button>`).join("")}</div>`;
+  };
+  draw();
+  pop.classList.add("paper-pop");
+  placePop(anchor, { alignRight: true });
+  pop.onclick = (e) => {
+    const b = e.target.closest("[data-pc],[data-ps]");
+    if (!b || !ed.id) return;
+    const isColor = b.dataset.pc !== undefined, val = isColor ? b.dataset.pc : b.dataset.ps;
+    patchNote(ed.id, isColor ? { paperColor: val } : { paper: val }, true);
+    draw();
+    const f = pop.querySelector(isColor ? `[data-pc="${val}"]` : `[data-ps="${val}"]`);
+    if (f) f.focus();
+  };
+  pop.onkeydown = (e) => {
+    if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); closeMenu(); anchor.focus(); return; }
+    if (/^Arrow/.test(e.key)) {
+      const bs = $$("button", pop), k = bs.indexOf(document.activeElement);
+      e.preventDefault();
+      bs[(k + (e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1) + bs.length) % bs.length].focus();
+    }
+  };
+  const first = pop.querySelector('[aria-pressed="true"]') || pop.querySelector("button");
+  if (first) first.focus();
+  armOutside();
+}
+
+/* ---------- share ---------- */
+function plainText(html) {
+  const t = document.createElement("template"); t.innerHTML = html || "";
+  t.content.querySelectorAll('ul[data-type="checklist"] > li').forEach((li) => li.prepend(li.dataset.checked === "true" ? "☑ " : "☐ "));
+  t.content.querySelectorAll("ul:not([data-type]) > li").forEach((li) => li.prepend("• "));
+  t.content.querySelectorAll("ol").forEach((ol) => [...ol.children].forEach((li, i) => li.prepend(i + 1 + ". ")));
+  t.content.querySelectorAll("a.att").forEach((a) => a.prepend("📎 "));
+  t.content.querySelectorAll("br").forEach((b) => b.replaceWith("\n"));
+  t.content.querySelectorAll("td,th").forEach((e) => e.append("\t"));
+  t.content.querySelectorAll("p,li,h1,h2,h3,div,blockquote,pre,tr,hr").forEach((e) => e.append("\n"));
+  return (t.content.textContent || "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+async function copyToClipboard(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;left:-9999px;top:0";
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand("copy"); ta.remove(); return ok;
+  } catch (e) { return false; }
+}
+async function shareNote(how) {
+  flushEditor();
+  const n = S.items.get(ed.id);
+  if (!n) return;
+  const title = n.title || "Nota senza titolo", body = plainText(n.html), text = (n.title ? n.title + "\n\n" : "") + body;
+  if (how === "native") {
+    try { await navigator.share({ title, text: body || title }); }
+    catch (e) {
+      if (e && e.name === "AbortError") return;
+      toast((await copyToClipboard(text)) ? "Il pannello Condividi non è disponibile qui: ho copiato il testo, incollalo dove vuoi." : "Il pannello Condividi non è disponibile qui.");
+    }
+  } else if (how === "mail") {
+    const long = text.length > 1800;
+    openUrl("mailto:?subject=" + encodeURIComponent(title) + "&body=" + encodeURIComponent(long ? text.slice(0, 1800) + "\n\n[…]" : text));
+    if (long) toast("La nota è lunga: nell'email c'è l'inizio. Per mandarla tutta, scaricala come pagina e allegala.");
+  } else if (how === "copy") {
+    toast((await copyToClipboard(text)) ? "Testo della nota copiato" : "Non riesco a copiare qui: seleziona il testo e usa Ctrl+C.");
+  } else if (how === "html") {
+    if (await downloadNoteHtml(n)) toast("Nota scaricata come pagina: puoi allegarla a un'email o a un messaggio.");
+  } else if (how === "md") exportNote();
+}
+async function shareToSpace() {
+  const n = S.items.get(ed.id);
+  if (!n || S.readOnly || !sharedOn()) return;
+  const sps = spaces().filter((s) => s.id !== n.spaceId);
+  const r = await dialog({
+    title: "Condividi in uno spazio",
+    text: "Le note di uno spazio sono visibili a tutte le persone con cui condividi Quaderno (menu Condividi di Claude, in alto). Chi ha accesso come collaboratore può anche modificarle.",
+    fields: [{ name: "sp", label: "Spazio", type: "select", value: sps[0] ? sps[0].id : "__new", options: [...sps.map((s) => ({ value: s.id, label: s.name || "Senza nome" })), { value: "__new", label: "Nuovo spazio…" }] }],
+    ok: "Sposta nello spazio",
+  });
+  if (!r) return;
+  let sp = r.values.sp;
+  if (sp === "__new") {
+    const name = await ask({ title: "Nuovo spazio", input: "", ok: "Crea spazio" });
+    if (!name) return;
+    sp = newId("s");
+    Store.put(sp, { kind: "space", name: name.slice(0, 80), createdBy: S.me, createdAt: Date.now() });
+  }
+  moveNote(ed.id, "sp:" + sp);
+}
+function shareMenu(anchor) {
+  const n = S.items.get(ed.id);
+  if (!n) return;
+  const canSpace = sharedOn() && !n.trashed && !S.readOnly;
+  openMenu(anchor, [
+    { head: "Condividi “" + (n.title || "Senza titolo") + "”" },
+    typeof navigator.share === "function" && { label: "Condividi con…", icon: "i-share", action: () => shareNote("native") },
+    { label: "Invia per email", icon: "i-mail", action: () => shareNote("mail") },
+    { label: "Copia il testo", icon: "i-copy", action: () => shareNote("copy") },
+    "-",
+    { label: "Scarica come pagina (.html)", icon: "i-download", action: () => shareNote("html") },
+    { label: "Scarica in Markdown (.md)", icon: "i-file", action: () => shareNote("md") },
+    canSpace && "-",
+    canSpace && { label: n.spaceId ? "Sposta in un altro spazio…" : "Condividi in uno spazio…", icon: "i-space", action: shareToSpace },
+  ], { alignRight: true });
 }
 
 /* ---------- shared click actions (pages, editor links, sidebar kids) ---------- */
@@ -2135,6 +2333,7 @@ blockquote{border-left:3px solid #2f54d4;margin:.8em 0;padding-left:1em;color:#6
 mark{background:#fff0a3}hr{border:0;border-top:1px solid #e2e6ed;margin:1.4em 0}td,th{border:1px solid #e2e6ed;padding:4px 8px}table{border-collapse:collapse}
 ul[data-type=checklist]{list-style:none;padding-left:.2em}ul[data-type=checklist]>li::before{content:"\\2610  "}ul[data-type=checklist]>li[data-checked=true]::before{content:"\\2611  "}ul[data-type=checklist]>li[data-checked=true]{text-decoration:line-through;color:#646d7e}
 @media(prefers-color-scheme:dark){body{background:#12151b;color:#e6e9ef}.tag{background:#232835}pre{background:#181c24}mark{background:#5e5316}a{color:#84a0ff}a.att{color:#e6e9ef;border-color:#272c37}}
+${paperCss(n)}
 </style></head><body><h1 class="t">${esc(n.title || "Senza titolo")}</h1><div class="m">${meta}${tags ? " " + tags : ""}</div>
 ${body}
 </body></html>`;
@@ -2251,10 +2450,14 @@ async function saveToOneDrive() {
   flushEditor();
   const n = S.items.get(ed.id);
   if (!n) return;
+  await downloadNoteHtml(n);
+  $("#toast").hidden = true;
+}
+async function downloadNoteHtml(n) {
   toast("Preparo la pagina con gli allegati…");
   const body = await noteBody(n.html, async (el) => { const b = await fetchEl(el); return b ? "data:" + (b.type || "application/octet-stream") + ";base64," + (await blobToB64(b)) : null; });
   saveBlob(safeName(n.title, "nota") + ".html", noteDoc(n, body), "text/html;charset=utf-8");
-  $("#toast").hidden = true;
+  return true;
 }
 
 /* ---------- Evernote import (.enex) ---------- */
@@ -2529,7 +2732,12 @@ pagePane.addEventListener("click", (e) => {
   if (b) {
     const d = b.dataset;
     if (d.pg === "menu") return openDrawer();
-    if (d.pg === "new-note") return newNote();
+    if (d.grip) return; // dragging is handled by the pointer events below
+    if (d.untile) { setHome(homeIds().filter((x) => x !== d.untile)); toast("Tolta dalla Home: la nota resta in Note."); return; }
+    if (d.pg === "home-add") return homeAdd();
+    if (d.pg === "home-reset") { setPrefs({ homeNotes: null }); renderPage(true); toast("La Home mostra di nuovo le note più recenti"); return; }
+    if (d.pg === "home-autosize") { setPrefs({ homeBox: null }); renderPage(true); return; }
+    if (d.pg === "new-note") { const ids = P().homeNotes; const id = newNote(); if (id && Array.isArray(ids)) setPrefs({ homeNotes: [id, ...ids].slice(0, 80) }); return; }
     if (d.pg === "new-event") return newEvent();
     if (d.pg === "new-nb") return addNotebook();
     if (d.pg === "new-space") return addSpace();
@@ -2553,7 +2761,44 @@ pagePane.addEventListener("click", (e) => {
   const day = e.target.closest("[data-day]");
   if (day && !S.readOnly) newEvent(day.dataset.day);
 });
+pagePane.addEventListener("pointerdown", (e) => {
+  const g = e.target.closest("[data-grip]");
+  if (!g || S.readOnly || e.button > 0) return;
+  e.preventDefault();
+  const tile = g.closest(".tile");
+  drag = { tile, box: tile.parentElement, pid: e.pointerId, moved: false };
+  try { g.setPointerCapture(e.pointerId); } catch (er) {}
+  tile.classList.add("dragging");
+});
+pagePane.addEventListener("pointermove", (e) => {
+  if (!drag || e.pointerId !== drag.pid) return;
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  const t = el && el.closest(".tile");
+  if (!t || t === drag.tile || t.parentElement !== drag.box) return;
+  const tiles = $$(".tile", drag.box);
+  if (tiles.indexOf(drag.tile) < tiles.indexOf(t)) t.after(drag.tile); else t.before(drag.tile);
+  drag.moved = true;
+});
+function endDrag(e) {
+  if (!drag || (e && e.pointerId !== drag.pid)) return;
+  const d = drag; drag = null;
+  d.tile.classList.remove("dragging");
+  if (d.moved) { setHome($$(".tile", d.box).map((t) => t.dataset.tile)); toast("Ordine della Home salvato"); }
+}
+pagePane.addEventListener("pointerup", endDrag);
+pagePane.addEventListener("pointercancel", endDrag);
 pagePane.addEventListener("keydown", (e) => {
+  const g = e.target.closest && e.target.closest("[data-grip]");
+  if (g && /^Arrow/.test(e.key) && !S.readOnly) {
+    e.preventDefault();
+    const ids = homeIds(), i = ids.indexOf(g.dataset.grip), j = i + (e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1);
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    setHome(ids);
+    const ng = $(`[data-grip="${CSS.escape(g.dataset.grip)}"]`, pagePane);
+    if (ng) ng.focus();
+    return;
+  }
   const day = e.target.closest && e.target.closest("[data-day]");
   if (day && e.target === day && (e.key === "Enter" || e.key === " ") && !S.readOnly) { e.preventDefault(); newEvent(day.dataset.day); }
 });
@@ -2690,6 +2935,8 @@ document.addEventListener("selectionchange", updateToolbarState);
 $("#edNotebook").addEventListener("change", (e) => moveNote(ed.id, e.target.value));
 $("#btnStar").onclick = () => { const n = S.items.get(ed.id); if (n) patchNote(ed.id, { pinned: !n.pinned }, false); };
 $("#btnNoteMore").onclick = (e) => noteMenu(e.currentTarget);
+$("#btnPaper").onclick = (e) => paperMenu(e.currentTarget);
+$("#btnShare").onclick = (e) => shareMenu(e.currentTarget);
 $("#btnOneDrive").onclick = saveToOneDrive;
 $("#btnBell").onclick = () => { if (ed.id) setReminder(ed.id); };
 $("#btnAI").onclick = (e) => aiMenu(e.currentTarget);
