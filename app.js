@@ -561,7 +561,8 @@ function containerForNew() {
 }
 
 const PAGE_TYPES = new Set(["home", "tasks", "files", "calendar", "notebooks", "tags", "spaces"]);
-const LIST_TYPES = new Set(["all", "starred", "reminders", "notebook", "tag", "templates", "shared", "space", "trash"]);
+const RECENT_MAX = 30; // notes listed in "Note recenti"
+const LIST_TYPES = new Set(["all", "recent", "starred", "reminders", "notebook", "tag", "templates", "shared", "space", "trash"]);
 const activeReminders = () => liveNotes().filter((n) => n.reminder && !n.reminderDone).sort((a, b) => a.reminder - b.reminder);
 
 /* Search syntax: words, "exact phrase", -exclude, tag:x (tag:x* prefix), -tag:x, taccuino:x / notebook:x,
@@ -626,6 +627,7 @@ function visibleNotes() {
   else if (S.sort === "title") arr.sort((a, b) => (a.title || "￿").localeCompare(b.title || "￿", "it"));
   else if (S.sort === "created") arr.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   else arr.sort(byUpdated);
+  if (f.type === "recent") arr = arr.sort(byUpdated).slice(0, RECENT_MAX); // always newest first
   return arr;
 }
 
@@ -657,6 +659,7 @@ const scAttr = (s) => `data-${s.t === "notebook" ? "nb" : s.t}="${esc(s.id)}"`;
 const SECTIONS = [
   { key: "home", label: "Home", icon: "i-home" },
   { key: "shortcuts", label: "Scorciatoie", icon: "i-star", kids: true },
+  { key: "recent", label: "Note recenti", icon: "i-clock", kids: true },
   { key: "all", label: "Note", icon: "i-notes" },
   { key: "tasks", label: "Attività", icon: "i-task" },
   { key: "reminders", label: "Promemoria", icon: "i-bell" },
@@ -666,7 +669,6 @@ const SECTIONS = [
   { key: "notebooks", label: "Taccuini", icon: "i-book", kids: true, add: "nb" },
   { key: "tags", label: "Tag", icon: "i-tag", kids: true },
   { key: "shared", label: "Condivisi con me", icon: "i-users", cloud: true },
-  { key: "spaces", label: "Spazi", icon: "i-space", kids: true, add: "space", cloud: true },
   { key: "trash", label: "Cestino", icon: "i-trash" },
 ];
 const SEC = Object.fromEntries(SECTIONS.map((s) => [s.key, s]));
@@ -693,6 +695,10 @@ const kid = (attrs, icon, label, n, active) => `<button class="nav-item${active 
 
 function kidsHtml(key) {
   const f = S.filter, live = liveNotes();
+  if (key === "recent") {
+    const rec = liveNotes().sort(byUpdated).slice(0, 6);
+    return rec.length ? rec.map((n) => kid(`data-note="${esc(n.id)}"`, "i-notes", n.title || "Senza titolo", "", S.activeId === n.id && LIST_TYPES.has(f.type))).join("") : `<div class="nav-empty">Le note che modifichi compaiono qui.</div>`;
+  }
   if (key === "shortcuts") {
     const items = shortcutItems();
     if (!items.length) return `<div class="nav-empty">Tocca la stella in una nota, o usa il tasto destro su un taccuino o un tag.</div>`;
@@ -757,7 +763,7 @@ function renderAcct() {
 /* ---------- note list ---------- */
 function listTitle() {
   const f = S.filter;
-  return ({ starred: "Scorciatoie", reminders: "Promemoria", trash: "Cestino", templates: "Modelli", shared: "Condivisi con me" })[f.type]
+  return ({ recent: "Note recenti", starred: "Scorciatoie", reminders: "Promemoria", trash: "Cestino", templates: "Modelli", shared: "Condivisi con me" })[f.type]
     || (f.type === "notebook" ? nbName(f.id) || "Taccuino" : f.type === "space" ? nbName(f.id) || "Spazio" : f.type === "tag" ? "#" + f.tag : "Note");
 }
 
@@ -1503,7 +1509,7 @@ function pageHome() {
   const remW = rems.length ? `<section class="w"><header><h2>Promemoria</h2><button class="link-btn" type="button" data-go="reminders">Tutti</button></header><div class="rows">${rems.map((n) => `<div class="row-i"><span class="due${n.reminder < Date.now() ? " late" : ymd(new Date(n.reminder)) === todayStr() ? " today" : ""}">${esc(remLabel(n.reminder))}</span><button class="grow" type="button" data-note="${esc(n.id)}">${esc(n.title || "Senza titolo")}</button>${ro ? "" : `<button class="link-btn" type="button" data-rem-done="${esc(n.id)}">Fatto</button>`}</div>`).join("")}</div></section>` : "";
   const sc = shortcutItems().slice(0, 10);
   const scW = `<section class="w"><header><h2>Scorciatoie</h2></header><div class="rows">${sc.length ? sc.map((s) => `<div class="row-i">${ic(scIcon[s.t], "ic sm")}<button class="grow" type="button" ${scAttr(s)}>${esc(s.label)}</button></div>`).join("") : `<div class="empty-s">Tocca la stella in una nota, o fai clic destro su un taccuino o un tag nel menu.</div>`}</div></section>`;
-  const padW = `<section class="w"><header><h2>Blocco appunti</h2>${ro ? "" : `<button class="link-btn" type="button" data-pg="scratch-note">Trasforma in nota</button>`}</header><textarea class="scratch" id="scratch" placeholder="Annota qualcosa al volo…" aria-label="Blocco appunti"${ro ? " readonly" : ""}>${esc(P().scratch || "")}</textarea></section>`;
+  const padW = `<section class="w pad"><header><h2>Blocco appunti</h2>${ro ? "" : `<button class="link-btn" type="button" data-pg="scratch-note">Trasforma in nota</button>`}</header><textarea class="scratch" id="scratch" placeholder="Annota qualcosa al volo…" aria-label="Blocco appunti"${ro ? " readonly" : ""}>${esc(P().scratch || "")}</textarea></section>`;
   const tags = allTags(), tl = [...tags.keys()].sort((a, b) => tags.get(b) - tags.get(a)).slice(0, 30);
   const tagW = `<section class="w"><header><h2>Tag</h2><button class="link-btn" type="button" data-go="tags">Gestisci</button></header>${tl.length ? `<div class="tag-cloud">${tl.map((t) => `<button type="button" data-tag="${esc(t)}">${esc(t)}<span class="n">${tags.get(t)}</span></button>`).join("")}</div>` : `<div class="empty-s">Nessun tag ancora.</div>`}</section>`;
   return pgHead(greet, WX.html(), cap(fLong.format(new Date()))) + `<div class="widgets">${notesW}${tasksW}${remW}${calW}${scW}${padW}${tagW}</div>`;

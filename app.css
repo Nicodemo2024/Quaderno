@@ -431,6 +431,14 @@ button.grow:hover { color: var(--accent); }
 .empty-s { color: var(--muted); font-size: 13px; padding: 6px 0; line-height: 1.5; }
 .scratch { width: 100%; min-height: 140px; resize: vertical; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--bg); font-family: var(--f-page); font-size: 16px; line-height: 1.5; outline: none; }
 .scratch:focus { border-color: var(--accent); }
+/* Home scratch pad: always a plain yellow sticky note, in light and dark mode */
+.w.pad { background: #fff3a8; border-color: #ecd35c; }
+.w.pad h2 { color: #6b5a00; }
+.w.pad .link-btn { color: #6b4f00; }
+.w.pad .link-btn:hover { background: rgba(0, 0, 0, .07); }
+.w.pad .scratch { background: #fff3a8; border-color: transparent; color: #3a3000; }
+.w.pad .scratch::placeholder { color: #8a7a2a; }
+.w.pad .scratch:focus { border-color: #c9a400; background: #fff3a8; }
 .add-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .add-row .field[type="text"] { flex: 1; min-width: 180px; }
 .field { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; background: var(--bg); outline: none; min-width: 0; }
