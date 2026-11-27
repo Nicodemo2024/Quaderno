@@ -1355,7 +1355,6 @@ function newMenu(anchor) {
     sharedOn() && { label: "Spazio condiviso…", icon: "i-space", disabled: ro, action: addSpace },
     "-",
     { label: "Carica file…", icon: "i-clip", disabled: ro || !Store.assets, action: () => $("#fileNew").click() },
-    { label: "Importa da Evernote…", icon: "i-import", disabled: ro, action: startImport },
   ]);
 }
 function acctMenu(anchor) {
@@ -1366,8 +1365,6 @@ function acctMenu(anchor) {
     cloud && { label: "Sincronizza ora", icon: "i-cloud", k: Store.lastSync ? relDate(Store.lastSync) : "", action: () => { Store.needAuth = false; Store.sync(); } },
     cloud && { label: "Apri la cartella in OneDrive", icon: "i-book", action: openDriveFolder },
     Cloud.Auth.configured && { label: "Calendario Outlook…", icon: "i-cal", k: calLinked() ? "collegato" : "scollegato", action: calendarAccount },
-    cloud && { label: P().readable === false ? "Attiva le copie leggibili (.html)" : "Disattiva le copie leggibili (.html)", icon: "i-file", action: () => OD.toggle() },
-    cloud && P().readable !== false && { label: "Rigenera tutte le copie leggibili", icon: "i-redo", action: () => OD.syncAll() },
     !cloud && { label: "Collega OneDrive…", icon: "i-cloud", action: connectOneDrive },
     "-",
     { label: "Personalizza menu…", icon: "i-gear", disabled: S.readOnly, action: customizeMenu },
@@ -1377,13 +1374,28 @@ function acctMenu(anchor) {
     { label: "Aggiorna", icon: "i-refresh", action: refreshApp },
     "Notification" in window && Notification.permission === "default" && { label: "Attiva le notifiche dei promemoria", icon: "i-bell", action: askNotify },
     "-",
-    { label: "Importa da Evernote…", icon: "i-import", disabled: S.readOnly, action: startImport },
-    { label: "Esporta tutte le note (.md)", icon: "i-download", action: exportAll },
-    { label: "Backup completo (.json)", icon: "i-save", action: exportBackup },
-    { label: "Ripristina da backup…", icon: "i-import", disabled: S.readOnly, action: () => $("#backupInput").click() },
+    { label: "Avanzate", icon: "i-tools", k: "backup · import · export", action: () => advancedMenu(anchor) },
     "-",
     { label: cloud ? "Esci (cancella la copia da questo dispositivo)" : "Cancella le note da questo dispositivo", icon: "i-back", danger: !cloud, action: signOut },
   ]);
+}
+function advancedMenu(anchor) {
+  const cloud = Store.mode === "cloud", ro = S.readOnly;
+  openMenu(anchor, [
+    { head: "Avanzate: backup, importazione, esportazione" },
+    { label: "Importa da Evernote…", icon: "i-import", disabled: ro, action: startImport },
+    { label: "Esporta tutte le note (.md)", icon: "i-download", action: exportAll },
+    { label: "Backup completo (.json)", icon: "i-save", action: exportBackup },
+    { label: "Ripristina da backup…", icon: "i-import", disabled: ro, action: () => $("#backupInput").click() },
+    cloud && "-",
+    cloud && { label: P().readable === false ? "Attiva le copie leggibili (.html)" : "Disattiva le copie leggibili (.html)", icon: "i-file", action: () => OD.toggle() },
+    cloud && P().readable !== false && { label: "Rigenera tutte le copie leggibili", icon: "i-redo", action: () => OD.syncAll() },
+  ]);
+}
+function heroSub() {
+  if (Store.mode !== "cloud") return S.myName ? S.myName + " · solo su questo dispositivo" : "Solo su questo dispositivo";
+  const a = Cloud.Auth.account || {}, name = a.name || S.myName || "";
+  return name && a.username && name !== a.username ? name + " · " + a.username : name || a.username || "";
 }
 async function openDriveFolder() {
   try { const r = await Cloud.Drive.info(); if (r && r.webUrl) openUrl(r.webUrl); }
@@ -1514,8 +1526,113 @@ function pageHome() {
   const padW = `<section class="w pad"><header><h2>Blocco appunti</h2>${ro ? "" : `<button class="link-btn" type="button" data-pg="scratch-note">Trasforma in nota</button>`}</header><textarea class="scratch" id="scratch" placeholder="Annota qualcosa al volo…" aria-label="Blocco appunti"${ro ? " readonly" : ""}>${esc(P().scratch || "")}</textarea></section>`;
   const tags = allTags(), tl = [...tags.keys()].sort((a, b) => tags.get(b) - tags.get(a)).slice(0, 30);
   const tagW = `<section class="w"><header><h2>Tag</h2><button class="link-btn" type="button" data-go="tags">Gestisci</button></header>${tl.length ? `<div class="tag-cloud">${tl.map((t) => `<button type="button" data-tag="${esc(t)}">${esc(t)}<span class="n">${tags.get(t)}</span></button>`).join("")}</div>` : `<div class="empty-s">Nessun tag ancora.</div>`}</section>`;
-  return pgHead(greet, WX.html(), cap(fLong.format(new Date()))) + `<div class="widgets">${notesW}${tasksW}${remW}${calW}${scW}${padW}${tagW}</div>`;
+  return HERO.html(greet, cap(fLong.format(new Date())), heroSub(), WX.html()) + `<div class="widgets">${notesW}${tasksW}${remW}${calW}${scW}${padW}${tagW}</div>`;
 }
+
+/* ---------- Home banner: a random nature photo (a drawn landscape while it loads, or if photos can't be reached) ---------- */
+const HERO_IDS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 28, 29, 33, 46, 54, 62, 93, 95, 107, 110, 112, 127, 128, 147, 162, 165, 166, 176, 177, 179];
+const HERO = {
+  id: 0, ok: false, seed: 1, src: "",
+  next() {
+    const prev = this.id;
+    do this.id = HERO_IDS[Math.floor(Math.random() * HERO_IDS.length)]; while (this.id === prev);
+    this.seed = 1 + Math.floor(Math.random() * 1e9); this.ok = false; this.src = "";
+    const id = this.id, narrow = innerWidth < 700;
+    const u = `https://picsum.photos/id/${id}/${narrow ? 1000 : 1800}/${narrow ? 560 : 520}`;
+    const im = new Image();
+    im.onload = () => {
+      if (this.id !== id) return;
+      this.ok = true; this.src = u;
+      const el = $("#heroImg");
+      if (el) { el.style.backgroundImage = `url("${u}")`; el.classList.add("on"); }
+    };
+    im.src = u;
+  },
+  html(title, eyebrow, sub, acts) {
+    if (!this.id) this.next();
+    const img = this.ok ? ` style="background-image:url(&quot;${esc(this.src)}&quot;)"` : "";
+    return `<div class="hero"><div class="hero-art" aria-hidden="true">${landscapeSvg(this.seed)}</div><div class="hero-img${this.ok ? " on" : ""}" id="heroImg"${img}></div><div class="hero-shade"></div>`
+      + `<div class="hero-in"><div class="hero-top"><button class="icon-btn menu-btn" type="button" data-pg="menu" aria-label="Apri il menu">${ic("i-menu")}</button><div class="acts">${acts}</div></div>`
+      + `<div class="hero-bot"><div class="ttl"><div class="eyebrow">${esc(eyebrow)}</div><h1>${esc(title)}</h1>${sub ? `<div class="hero-sub">${esc(sub)}</div>` : ""}</div>`
+      + `<button class="hero-btn" type="button" data-pg="hero-next" title="Cambia immagine" aria-label="Cambia immagine">${ic("i-image", "ic sm")}</button></div></div></div>`;
+  },
+};
+/* Mountains, hills and sky in the colours of the time of day: always available, also offline. */
+function landscapeSvg(seed) {
+  let s = seed >>> 0;
+  const rnd = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const hr = new Date().getHours(), night = hr >= 20 || hr < 6, warm = !night && (hr < 9 || hr >= 17);
+  const sky = night ? ["#0d1b3a", "#34507f", "#f3eed2"] : warm ? ["#ee8a5e", "#fdd6a0", "#fff4c8"] : ["#4f97e3", "#d2e9ff", "#fff8d8"];
+  const sets = [["#8fa9c8", "#5f83aa", "#3f6187", "#27445f"], ["#a3bf9f", "#6f9a72", "#4b7a52", "#2f5638"], ["#bcaecd", "#8b7fae", "#62598a", "#3d3866"], ["#a9c7cb", "#77a3a8", "#4f7f86", "#2f5a60"]];
+  const cols = sets[Math.floor(rnd() * sets.length)], W = 1200, H = 320;
+  let hills = "";
+  cols.forEach((c, i) => {
+    const base = 150 + i * 42, amp = 74 - i * 13, n = 6 + i * 3;
+    let d = `M0 ${H}L0 ${base - Math.round(rnd() * amp * .6)}`;
+    for (let k = 1; k <= n; k++) d += `L${Math.round((W * k) / n)} ${Math.round(base - rnd() * amp + amp * .3)}`;
+    hills += `<path d="${d}L${W} ${H}Z" fill="${c}"/>`;
+  });
+  const cx = Math.round(180 + rnd() * 840), cy = Math.round(62 + rnd() * 40);
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="heroSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${sky[0]}"/><stop offset="1" stop-color="${sky[1]}"/></linearGradient></defs><rect width="${W}" height="${H}" fill="url(#heroSky)"/><circle cx="${cx}" cy="${cy}" r="${night ? 20 : 32}" fill="${sky[2]}" opacity=".92"/>${hills}</svg>`;
+}
+
+/* ---------- Home: Google News headlines scrolling at the bottom ----------
+   Google News has no CORS, so the public feed goes through rss2json (it only receives the feed address). */
+const NEWS_FEED = "https://news.google.com/rss?hl=it&gl=IT&ceid=IT:it";
+const NEWS_SITE = "https://news.google.com/?hl=it&gl=IT&ceid=IT:it";
+const reduceMotion = () => { try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; } };
+const NEWS = {
+  items: [], at: 0, tried: 0, busy: false, err: false, x: 0, raf: 0, last: 0, paused: false,
+  init() { try { const c = JSON.parse(lsGet("quaderno.news") || "null"); if (c && Array.isArray(c.items)) { this.items = c.items; this.at = c.at || 0; } } catch (e) {} },
+  async refresh(force) {
+    const now = Date.now();
+    if (this.busy || (!force && (now - this.at < 15 * 60000 || now - this.tried < 5 * 60000))) return;
+    this.busy = true; this.tried = now;
+    try {
+      const r = await fetch("https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(NEWS_FEED));
+      const j = await r.json();
+      if (!j || j.status !== "ok" || !Array.isArray(j.items)) throw new Error("feed");
+      const items = j.items.map((it) => {
+        const t = String(it.title || ""), i = t.lastIndexOf(" - ");
+        return { t: (i > 0 ? t.slice(0, i) : t).trim(), s: i > 0 ? t.slice(i + 3).trim() : "", u: String(it.link || "") };
+      }).filter((x) => x.t && /^https:\/\//.test(x.u)).slice(0, 25);
+      if (items.length) { this.items = items; this.at = Date.now(); this.err = false; lsSet("quaderno.news", JSON.stringify({ items, at: this.at })); }
+    } catch (e) { this.err = true; }
+    this.busy = false;
+    this.paint();
+  },
+  inner() {
+    if (!this.items.length) return `<span class="nb-msg">${this.err ? "Notizie non raggiungibili in questo momento." : "Carico le notizie…"} <button class="link-btn" type="button" data-url="${esc(NEWS_SITE)}">Apri Google News</button></span>`;
+    const sep = '<span class="nb-sep" aria-hidden="true">•</span>';
+    const list = (dup) => this.items.map((n) => `<button type="button" class="nb-i" data-url="${esc(n.u)}"${dup ? ' tabindex="-1"' : ""} title="${esc(n.s ? "Apri la notizia su " + n.s : "Apri la notizia")}">${esc(n.t)}${n.s ? `<small>${esc(n.s)}</small>` : ""}</button>`).join(sep) + sep;
+    return list(false) + (reduceMotion() ? "" : `<span class="nb-dup" aria-hidden="true">${list(true)}</span>`);
+  },
+  html() { return `<div class="newsbar" id="newsBar" role="region" aria-label="Notizie da Google News"><button class="nb-tag" type="button" data-url="${esc(NEWS_SITE)}" title="Apri Google News">${ic("i-news", "ic sm")}<span>Notizie</span></button><div class="nb-view"><div class="nb-track" id="nbTrack">${this.inner()}</div></div></div>`; },
+  paint() { const tr = $("#nbTrack"); if (!tr) return; tr.innerHTML = this.inner(); this.x = 0; this.start(); },
+  start() {
+    const bar = $("#newsBar"), tr = $("#nbTrack");
+    if (!bar || !tr) return;
+    const hold = (v) => () => { this.paused = v; };
+    bar.onpointerenter = (e) => { if (e.pointerType === "mouse") this.paused = true; };
+    bar.onpointerleave = hold(false); bar.onfocusin = hold(true); bar.onfocusout = hold(false);
+    tr.style.transform = `translateX(${this.x}px)`;
+    if (!this.raf && this.items.length && !reduceMotion()) { this.last = 0; this.raf = requestAnimationFrame((t) => this.tick(t)); }
+  },
+  tick(ts) {
+    const tr = $("#nbTrack"), dup = tr && tr.querySelector(".nb-dup");
+    if (!dup) { this.raf = 0; return; }            // Home closed: stop until it opens again
+    const dt = this.last ? Math.min(80, ts - this.last) : 0;
+    this.last = ts;
+    if (!this.paused) {
+      this.x -= dt * 0.055;
+      const w = dup.offsetLeft;
+      if (w > 0 && -this.x >= w) this.x += w;
+      tr.style.transform = `translateX(${this.x.toFixed(1)}px)`;
+    }
+    this.raf = requestAnimationFrame((t) => this.tick(t));
+  },
+};
+NEWS.init();
 
 function pageTasks() {
   const list = tasks(), t0 = todayStr(), ro = S.readOnly;
@@ -1618,9 +1735,9 @@ function renderPage(force) {
     if (k) refocus = `[data-${k.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase())}="${CSS.escape(a.dataset[k])}"]`;
   }
   const h = t === "home" ? pageHome() : t === "tasks" ? pageTasks() : t === "calendar" ? pageCalendar() : t === "files" ? pageFiles() : t === "notebooks" ? pageNotebooks() : t === "tags" ? pageTags() : pageSpaces();
-  pagePane.innerHTML = `<div class="pg">${h}</div>`;
+  pagePane.innerHTML = `<div class="pg">${h}</div>` + (t === "home" ? NEWS.html() : "");
   applyHomeBg();
-  if (t === "home") WX.refresh();
+  if (t === "home") { WX.refresh(); NEWS.start(); NEWS.refresh(); }
   hydrate(pagePane, true);
   pagePane.scrollTop = top;
   if (refocus) { const el = $(refocus, pagePane); if (el) el.focus({ preventScroll: true }); }
@@ -3224,6 +3341,8 @@ pagePane.addEventListener("click", (e) => {
   if (b) {
     const d = b.dataset;
     if (d.pg === "menu") return openDrawer();
+    if (d.pg === "hero-next") { HERO.next(); renderPage(true); return; }
+    if (d.url) { if (/^https:\/\//.test(d.url)) openUrl(d.url); return; }
     if (d.pg === "wx-set") return chooseCity();
     if (d.pg === "ol-connect") return calWhich() === "other" ? connectCalendar(calWho()) : connectOutlook();
     if (d.pg === "ol-account") return calendarAccount();

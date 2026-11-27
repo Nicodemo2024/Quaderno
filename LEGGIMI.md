@@ -107,13 +107,13 @@ Quando hai finito usa **menu del tuo nome › Esci**: la copia delle note su que
 
 - **Da Evernote**:
   1. Nell'app desktop di Evernote: clic destro sul taccuino › *Esporta* › formato **ENEX**.
-  2. In Quaderno: **Nuovo › Importa da Evernote** e scegli i file .enex.
+  2. In Quaderno: **menu del tuo nome › Avanzate › Importa da Evernote** e scegli i file .enex.
 
   Ogni file diventa un taccuino. Vengono importati anche immagini, allegati, liste di controllo, tag e promemoria.
 - **Dalla versione di Quaderno su Claude**:
-  1. Apri Quaderno su Claude e usa *menu del tuo nome › Backup completo con immagini (.json)*. Con molte immagini ci vuole qualche minuto: lascia la pagina aperta finché compare "Backup salvato".
+  1. Apri Quaderno su Claude e usa *menu del tuo nome › Avanzate › Backup completo con immagini (.json)*. Con molte immagini ci vuole qualche minuto: lascia la pagina aperta finché compare "Backup salvato".
   2. Salva il file, per esempio in OneDrive.
-  3. Qui usa *menu del tuo nome › Ripristina da backup* e scegli quel file.
+  3. Qui usa *menu del tuo nome › Avanzate › Ripristina da backup* e scegli quel file.
 
   Passano testo, taccuini, attività, promemoria, **immagini e allegati**: le immagini finiscono nella cartella `files` di OneDrive.
   Un backup fatto prima di novembre 2026 (voce *Backup completo (.json)*) non contiene le immagini: al loro posto compare *[Immagine … non inclusa nel backup]*. In quel caso rifai il backup con la nuova voce.
@@ -160,6 +160,12 @@ E al contrario, il **calendario di Outlook** c'è solo qui: la versione su Claud
   - Funziona anche se usi Quaderno **solo su questo dispositivo**, senza OneDrive.
   - Circa una volta al giorno Microsoft chiede di rinnovare l'accesso: Quaderno lo fa da solo; se non ci riesce, nel Calendario compare **Collega il calendario**.
 - **Meteo**: in alto a destra nella Home. La prima volta scegli la città; cliccandolo vedi le previsioni dei prossimi giorni o cambi città. I dati arrivano da Open-Meteo, un servizio gratuito che riceve solo la città scelta.
+
+## La Home
+
+- **Menu Avanzate**: nel menu del tuo nome, la voce **Avanzate** raccoglie tutto ciò che riguarda backup e trasferimenti: importa da Evernote, esporta tutte le note (.md), backup completo (.json), ripristina da backup e, con OneDrive, le copie leggibili (.html).
+- **Fascia in alto**: una foto di un paesaggio naturale scelta a caso a ogni apertura, con la data, il saluto (Buongiorno, Buon pomeriggio, Buonasera), il nome dell'account e il meteo. Il pulsante con l'immagine in basso a destra della fascia cambia foto. Le foto arrivano da picsum.photos (foto libere di Unsplash). Se non sono raggiungibili, per esempio offline, compare un paesaggio disegnato con i colori dell'ora del giorno.
+- **Notizie**: in fondo alla Home scorrono i titoli di Google News Italia; passandoci sopra con il mouse si fermano, un clic apre la notizia. Google News non si può leggere direttamente da una pagina web, quindi i titoli passano dal servizio gratuito rss2json.com, che riceve solo l'indirizzo pubblico di Google News. Si aggiornano ogni 15 minuti; offline resta l'ultima copia.
 
 ## Buono a sapersi
 
