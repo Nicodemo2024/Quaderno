@@ -40,6 +40,7 @@ Servono tre passi:
 6. Vai su **Settings** › **Pages** (menu a sinistra). In **Branch** scegli `main` e la cartella `/ (root)`, poi **Save**.
 7. Dopo 1–2 minuti il sito è online a `https://TUONOME.github.io/quaderno/`, dove `TUONOME` è il tuo nome utente GitHub.
 8. **Annota l'indirizzo**, con la barra finale: serve al passo 2.
+   Maiuscole e minuscole contano: se il repository si chiama `Quaderno`, l'indirizzo è `…github.io/Quaderno/`, e con `quaderno` minuscolo si ottiene "404". Vale anche sul telefono, dove la tastiera spesso cambia la prima lettera.
 
 Online va solo il programma. Le note non sono lì.
 
@@ -56,8 +57,9 @@ Online va solo il programma. Le note non sono lì.
 5. Nella pagina che si apre copia l'**ID applicazione (client)**: è un codice come `1a2b3c4d-....`.
 6. Vai su **Autenticazione** › nella sezione *Applicazione a pagina singola* clicca **Aggiungi URI**. Incolla l'indirizzo di GitHub del passo 1 (es. `https://TUONOME.github.io/quaderno/`), poi **Salva**.
    Alla fine devono esserci **due** indirizzi: `http://localhost:47213/` e quello di GitHub.
-7. Vai su **Autorizzazioni API** › **Aggiungi un'autorizzazione** › **Microsoft Graph** › **Autorizzazioni delegate**. Cerca e spunta **Files.ReadWrite.AppFolder**, poi **Aggiungi autorizzazioni**.
-   Con questa autorizzazione Quaderno vede **solo la sua cartella**, non il resto del tuo OneDrive.
+7. Vai su **Autorizzazioni API** › **Aggiungi un'autorizzazione** › **Microsoft Graph** › **Autorizzazioni delegate**. Cerca e spunta **Files.ReadWrite.AppFolder** e **Calendars.Read**, poi **Aggiungi autorizzazioni**.
+   - Con **Files.ReadWrite.AppFolder** Quaderno vede **solo la sua cartella**, non il resto del tuo OneDrive.
+   - Con **Calendars.Read** Quaderno può **leggere** il calendario di Outlook, per mostrarlo nel Calendario e nella Home. Non può modificarlo.
 
 ### 3. Inserisci il codice e aggiorna exe e GitHub
 
@@ -138,6 +140,26 @@ Gli account di lavoro o di scuola potrebbero richiedere il permesso del loro amm
 
 - **Assistente**: funziona solo dentro Claude.
 - **Spazi condivisi**: servirebbe un server comune.
+
+E al contrario, il **calendario di Outlook** c'è solo qui: la versione su Claude non accede al tuo account Microsoft.
+
+## Note vocali
+
+- **Nuovo › Nota vocale…** crea una nota nuova con una registrazione; **⋯ › Registra una nota vocale…** la aggiunge alla nota aperta.
+- La prima volta il PC o il telefono chiede il permesso di usare il microfono.
+- La registrazione (fino a 15 minuti) è un allegato come gli altri: sta sul dispositivo e in OneDrive (cartella `files`). Nella nota compare come "🎤 Nota vocale · durata": un clic la fa ascoltare. Nelle copie leggibili `.html` c'è il lettore audio.
+
+## Calendario di Outlook e meteo
+
+- **Calendario di Outlook**: con l'accesso Microsoft, gli appuntamenti del tuo calendario Outlook compaiono nel Calendario e nella Home di Quaderno, in sola lettura: Quaderno non li modifica. Gli eventi che crei in Quaderno restano in Quaderno.
+  - La prima volta, nel Calendario compare **Collega il calendario Outlook**: Microsoft chiede il permesso di leggere il calendario, una volta sola.
+  - **Cambiare o scollegare l'account del calendario**: menu del tuo nome › **Calendario Outlook…** (oppure **Account…** in cima al Calendario). Puoi collegare il calendario di **qualsiasi account Microsoft**, anche diverso da quello delle note su OneDrive: un account alla volta, scelto su ogni dispositivo. Le note restano sempre sull'account di OneDrive.
+    - **Collega un altro account…**: Microsoft ti fa scegliere l'account; da quel momento vedi i suoi appuntamenti.
+    - **Usa l'account di OneDrive**: torna al calendario dello stesso account delle note.
+    - **Scollega**: gli appuntamenti di Outlook spariscono da Quaderno su questo dispositivo (Outlook non viene toccato).
+  - Funziona anche se usi Quaderno **solo su questo dispositivo**, senza OneDrive.
+  - Circa una volta al giorno Microsoft chiede di rinnovare l'accesso: Quaderno lo fa da solo; se non ci riesce, nel Calendario compare **Collega il calendario**.
+- **Meteo**: in alto a destra nella Home. La prima volta scegli la città; cliccandolo vedi le previsioni dei prossimi giorni o cambi città. I dati arrivano da Open-Meteo, un servizio gratuito che riceve solo la città scelta.
 
 ## Buono a sapersi
 

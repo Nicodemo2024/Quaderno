@@ -11,6 +11,9 @@
 const CFG = window.QUADERNO_CONFIG || {};
 const AUTHORITY = String(CFG.authority || "https://login.microsoftonline.com/common").replace(/\/+$/, "");
 const SCOPES = "openid profile offline_access Files.ReadWrite.AppFolder";
+// Outlook calendar, read-only. Asked at every interactive sign-in, used with its own token,
+// so syncing the notes keeps working even if this permission has not been given yet.
+const CAL_SCOPES = "openid offline_access Calendars.Read";
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const TOKENS_KEY = "quaderno.auth";
 const PKCE_KEY = "quaderno.pkce";
@@ -52,7 +55,7 @@ const Auth = {
     try { sessionStorage.setItem(PKCE_KEY, JSON.stringify({ verifier, state, silent })); } catch (e) {}
     const q = new URLSearchParams({
       client_id: CFG.clientId, response_type: "code", redirect_uri: redirectUri(), response_mode: "query",
-      scope: SCOPES, state, code_challenge: b64url(await sha256(verifier)), code_challenge_method: "S256",
+      scope: silent ? SCOPES : SCOPES + " Calendars.Read", state, code_challenge: b64url(await sha256(verifier)), code_challenge_method: "S256",
       prompt: silent ? "none" : "select_account",
     });
     if (hint) q.set("login_hint", hint);
@@ -67,6 +70,7 @@ const Auth = {
     try { saved = JSON.parse(sessionStorage.getItem(PKCE_KEY) || "null"); sessionStorage.removeItem(PKCE_KEY); } catch (e) {}
     history.replaceState(null, "", redirectUri() + location.hash);
     if (!saved || p.get("state") !== saved.state) return { error: "state_mismatch", description: "La risposta di accesso non corrisponde: riprova.", silent: !!(saved && saved.silent) };
+    if (saved.purpose === "cal") return CalAuth.finish(p, saved);           // sign-in of the calendar account
     if (p.has("error")) return { error: p.get("error"), description: p.get("error_description") || "", silent: saved.silent };
     const r = await this.tokenRequest({ grant_type: "authorization_code", code: p.get("code"), redirect_uri: redirectUri(), code_verifier: saved.verifier });
     return r.ok ? { ok: true, silent: saved.silent } : { error: r.error, description: r.description, silent: saved.silent };
@@ -102,8 +106,99 @@ const Auth = {
     throw fail("reauth", r.description);
   },
   expire() { if (this.tokens) this.tokens.exp = 0; },
+
+  /* A token for the Outlook calendar. Throws code "cal_consent" when the user has not allowed it yet. */
+  cal: null,
+  calRefreshing: null,
+  async calToken() {
+    const t = this.tokens;
+    if (!t || !t.refresh) throw fail("reauth");
+    if (this.cal && this.cal.exp - 120000 > Date.now()) return this.cal.access;
+    if (!this.calRefreshing) this.calRefreshing = (async () => {
+      let res, j;
+      try {
+        res = await fetch(AUTHORITY + "/oauth2/v2.0/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ client_id: CFG.clientId, scope: CAL_SCOPES, grant_type: "refresh_token", refresh_token: this.tokens.refresh }),
+        });
+        j = await res.json();
+      } catch (e) { throw fail("offline"); }
+      if (!res.ok || !j.access_token) {
+        const why = (j.error || "") + " " + (j.error_description || "");
+        throw fail(/consent|AADSTS65001|interaction_required|invalid_scope|AADSTS70011/i.test(why) ? "cal_consent" : /invalid_grant/i.test(why) ? "reauth" : "cal_error", j.error_description || j.error || "");
+      }
+      this.cal = { access: j.access_token, exp: Date.now() + (+j.expires_in || 3600) * 1000 };
+      if (j.refresh_token) this.save({ ...this.tokens, refresh: j.refresh_token });
+      return j.access_token;
+    })().finally(() => { this.calRefreshing = null; });
+    return this.calRefreshing;
+  },
   signOutUrl() { return AUTHORITY + "/oauth2/v2.0/logout?post_logout_redirect_uri=" + encodeURIComponent(redirectUri()); },
 };
+
+/* ---------- calendar account ----------
+   The Outlook calendar can come from a different Microsoft account than the notes (OneDrive).
+   Its tokens live apart ("quaderno.calauth") and only carry Calendars.Read. */
+const CAL_TOKENS_KEY = "quaderno.calauth";
+const CAL_SIGNIN = "openid profile offline_access Calendars.Read";
+const CalAuth = {
+  tokens: null,
+  refreshing: null,
+  get connected() { return !!(this.tokens && this.tokens.refresh); },
+  get account() { return (this.tokens && this.tokens.account) || null; },
+  load() { try { this.tokens = JSON.parse(lsGet(CAL_TOKENS_KEY) || "null"); } catch (e) { this.tokens = null; } return this.tokens; },
+  save(t) { this.tokens = t; lsSet(CAL_TOKENS_KEY, t ? JSON.stringify(t) : null); },
+  signOut() { this.save(null); },
+
+  /* Leaves the page for Microsoft: the user picks any account. silent: renew without showing anything. */
+  async signIn({ silent = false, hint = "" } = {}) {
+    if (!CFG.clientId) throw fail("not_configured", "Manca il clientId in config.js");
+    const verifier = randomString(48), state = randomString(16);
+    try { sessionStorage.setItem(PKCE_KEY, JSON.stringify({ verifier, state, silent, purpose: "cal" })); } catch (e) {}
+    const q = new URLSearchParams({
+      client_id: CFG.clientId, response_type: "code", redirect_uri: redirectUri(), response_mode: "query",
+      scope: CAL_SIGNIN, state, code_challenge: b64url(await sha256(verifier)), code_challenge_method: "S256",
+      prompt: silent ? "none" : "select_account",
+    });
+    if (hint) q.set("login_hint", hint);
+    location.assign(AUTHORITY + "/oauth2/v2.0/authorize?" + q);
+  },
+  async finish(p, saved) {
+    if (p.has("error")) return { calendar: true, error: p.get("error"), description: p.get("error_description") || "", silent: !!saved.silent };
+    const r = await this.tokenRequest({ grant_type: "authorization_code", code: p.get("code"), redirect_uri: redirectUri(), code_verifier: saved.verifier });
+    return r.ok ? { calendar: true, ok: true, silent: !!saved.silent } : { calendar: true, error: r.error, description: r.description, silent: !!saved.silent };
+  },
+  async tokenRequest(params) {
+    let res, j;
+    try {
+      res = await fetch(AUTHORITY + "/oauth2/v2.0/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_id: CFG.clientId, scope: CAL_SIGNIN, ...params }),
+      });
+      j = await res.json();
+    } catch (e) { return { ok: false, error: "network" }; }
+    if (!res.ok || !j.access_token) return { ok: false, error: j.error || "token_error", description: j.error_description || "" };
+    const prev = this.tokens || {};
+    const cl = j.id_token ? jwtPayload(j.id_token) : null;
+    const account = cl ? { id: cl.oid || cl.sub || "", name: cl.name || "", username: cl.preferred_username || cl.email || "" } : prev.account || null;
+    this.save({ access: j.access_token, exp: Date.now() + (+j.expires_in || 3600) * 1000, refresh: j.refresh_token || prev.refresh || "", account });
+    return { ok: true };
+  },
+  async token() {
+    const t = this.tokens;
+    if (!t || !t.refresh) throw fail("reauth");
+    if (t.access && t.exp - 120000 > Date.now()) return t.access;
+    if (!this.refreshing) this.refreshing = this.tokenRequest({ grant_type: "refresh_token", refresh_token: t.refresh }).finally(() => { this.refreshing = null; });
+    const r = await this.refreshing;
+    if (r.ok) return this.tokens.access;
+    if (r.error === "network") throw fail("offline");
+    throw fail(/consent|AADSTS65001/i.test(r.error + " " + r.description) ? "cal_consent" : "reauth", r.description);
+  },
+  expire() { if (this.tokens) this.tokens.exp = 0; },
+};
+CalAuth.load();
 
 /* ---------- Microsoft Graph ---------- */
 async function graph(path, { method = "GET", body, headers = {}, raw = false } = {}) {
@@ -245,5 +340,52 @@ const IDB = {
   async wipe() { for (const s of STORES) await this.clear(s); },
 };
 
-window.Cloud = { Auth, graph, Drive, IDB, redirectUri };
+/* ---------- Outlook calendar (read-only) ---------- */
+const pad2 = (n) => String(n).padStart(2, "0");
+const ymdL = (d) => d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+const hmL = (d) => pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+async function calFetch(url, which) {
+  const other = which === "other";
+  for (let attempt = 0; ; attempt++) {
+    const tok = other ? await CalAuth.token() : await Auth.calToken();
+    let res;
+    try { res = await fetch(url, { headers: { Authorization: "Bearer " + tok } }); }
+    catch (e) { throw fail("offline"); }
+    if (res.status === 401 && attempt === 0) { if (other) CalAuth.expire(); else Auth.cal = null; continue; }
+    if (res.status === 403) throw fail("cal_consent");
+    if ((res.status === 429 || res.status >= 500) && attempt < 3) { await sleep(2000 * (attempt + 1)); continue; }
+    if (!res.ok) throw fail("cal_error", "Errore " + res.status, { status: res.status });
+    return res.json();
+  }
+}
+/* Graph gives times in UTC: they become local day and hour here. All-day events keep their own dates. */
+function normEvent(ev) {
+  const st = ev.start || {}, en = ev.end || {};
+  if (!st.dateTime) return null;
+  const base = { id: ev.id, title: ev.subject || "(senza titolo)", location: (ev.location && ev.location.displayName) || "", link: ev.webLink || "" };
+  if (ev.isAllDay) {
+    const d = st.dateTime.slice(0, 10), last = new Date((en.dateTime || st.dateTime).slice(0, 10) + "T12:00:00");
+    last.setDate(last.getDate() - 1);
+    const endDate = ymdL(last) < d ? d : ymdL(last);
+    return { ...base, allDay: true, date: d, endDate, time: "", endTime: "" };
+  }
+  const s = new Date(st.dateTime.replace(/\.\d+$/, "") + "Z"), e = new Date((en.dateTime || st.dateTime).replace(/\.\d+$/, "") + "Z");
+  return { ...base, allDay: false, date: ymdL(s), endDate: e > s ? ymdL(new Date(e - 1)) : ymdL(s), time: hmL(s), endTime: hmL(e) };
+}
+const Cal = {
+  /* Appointments from day `from` (included) to day `to` (excluded), "YYYY-MM-DD" in local time. */
+  async view(from, to, which) {
+    const s = new Date(from + "T00:00:00").toISOString(), e = new Date(to + "T00:00:00").toISOString();
+    let url = `${GRAPH}/me/calendarView?startDateTime=${encodeURIComponent(s)}&endDateTime=${encodeURIComponent(e)}&$select=id,subject,start,end,isAllDay,isCancelled,location,webLink&$orderby=start/dateTime&$top=200`;
+    const out = [];
+    for (let pages = 0; url && pages < 30; pages++) {
+      const j = await calFetch(url, which);
+      for (const ev of j.value || []) { if (ev.isCancelled) continue; const x = normEvent(ev); if (x) out.push(x); }
+      url = j["@odata.nextLink"] || null;
+    }
+    return out;
+  },
+};
+
+window.Cloud = { Auth, CalAuth, graph, Drive, IDB, redirectUri, Cal };
 })();

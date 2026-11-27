@@ -205,6 +205,7 @@ const Store = {
     if (!this.persistOk) toast("Questo browser non permette di salvare dati sul dispositivo: le note restano solo finché la pagina è aperta.");
     let red = null;
     if (Cloud.Auth.configured) { try { red = await Cloud.Auth.handleRedirect(); } catch (e) { red = { error: "network" }; } }
+    if (red && red.calendar) { onCalRedirect(red); red = null; }        // back from connecting the calendar account
     Cloud.Auth.load();
     if (red && red.ok) { try { sessionStorage.removeItem("quaderno.silent"); } catch (e) {} }
     if (Cloud.Auth.configured && Cloud.Auth.signedIn) {
@@ -510,6 +511,7 @@ async function signOut() {
   if (!ok) return;
   await Store.wipeLocal();
   lsSet("quaderno.mode", ""); lsSet("quaderno.last", "");
+  Cloud.CalAuth.signOut(); lsSet("quaderno.calmode", "");
   if (local) { location.reload(); return; }
   Cloud.Auth.save(null);
   location.assign(Cloud.Auth.signOutUrl());
@@ -1363,7 +1365,7 @@ function acctMenu(anchor) {
     { head: cloud ? (acc.username || S.myName || "Il tuo account Microsoft") : "Solo su questo dispositivo" },
     cloud && { label: "Sincronizza ora", icon: "i-cloud", k: Store.lastSync ? relDate(Store.lastSync) : "", action: () => { Store.needAuth = false; Store.sync(); } },
     cloud && { label: "Apri la cartella in OneDrive", icon: "i-book", action: openDriveFolder },
-    cloud && { label: P().outlook === false ? "Mostra il calendario Outlook" : "Nascondi il calendario Outlook", icon: "i-cal", action: () => { const on = P().outlook === false; setPrefs({ outlook: on }); renderAll(); if (on) OL.ensure(todayStr(), addDays(todayStr(), 14), true); toast(on ? "Calendario Outlook visibile" : "Calendario Outlook nascosto"); } },
+    Cloud.Auth.configured && { label: "Calendario Outlook…", icon: "i-cal", k: calLinked() ? "collegato" : "scollegato", action: calendarAccount },
     cloud && { label: P().readable === false ? "Attiva le copie leggibili (.html)" : "Disattiva le copie leggibili (.html)", icon: "i-file", action: () => OD.toggle() },
     cloud && P().readable !== false && { label: "Rigenera tutte le copie leggibili", icon: "i-redo", action: () => OD.syncAll() },
     !cloud && { label: "Collega OneDrive…", icon: "i-cloud", action: connectOneDrive },
@@ -1905,14 +1907,20 @@ function wxMenu(anchor) {
 /* ---------- Outlook calendar (read-only) ----------
    Appointments come from the Microsoft account with the separate Calendars.Read permission
    (Cloud.Cal), are kept on the device for offline use (meta "outlook") and are never written back. */
+const CALMODE_KEY = "quaderno.calmode";   // on this device: "" = the OneDrive account, "other" = another account, "off"
+const calMode = () => { const m = lsGet(CALMODE_KEY) || ""; return m === "other" || m === "off" ? m : ""; };
+const calWhich = () => (calMode() === "other" ? "other" : "main");
+const calLinked = () => { const m = calMode(); return m === "other" ? true : m === "off" ? false : Store.mode === "cloud" && P().outlook !== false; };
+function calWho() { const a = calWhich() === "other" ? Cloud.CalAuth.account : Store.mode === "cloud" ? Cloud.Auth.account : null; return a ? a.username || a.name || "" : ""; }
+const calKey = () => calWhich() + ":" + ((calWhich() === "other" ? (Cloud.CalAuth.account || {}).id : S.me) || "");
 const OL = {
   events: [], from: "", to: "", at: 0, state: "", busy: false, tried: 0, loaded: false,
-  get on() { return Store.mode === "cloud" && P().outlook !== false; },
+  get on() { return Cloud.Auth.configured && calLinked(); },
   async ensure(from, to, force) {
     if (!this.on) return;
     if (!this.loaded) {
       this.loaded = true;
-      try { const c = await idb.get("meta", "outlook"); if (c && Array.isArray(c.events) && c.account === S.me) { this.events = c.events; this.from = c.from; this.to = c.to; this.at = c.at || 0; } } catch (e) {}
+      try { const c = await idb.get("meta", "outlook"); if (c && Array.isArray(c.events) && c.account === calKey()) { this.events = c.events; this.from = c.from; this.to = c.to; this.at = c.at || 0; } } catch (e) {}
     }
     const covered = this.from && this.from <= from && this.to >= to;
     if (this.busy) return;
@@ -1922,25 +1930,74 @@ const OL = {
     const wf = [from, addDays(t0, -31)].sort()[0], wt = [to, addDays(t0, 92)].sort()[1];
     this.busy = true; this.tried = Date.now();
     try {
-      this.events = await Cloud.Cal.view(wf, wt);
+      this.events = await Cloud.Cal.view(wf, wt, calWhich());
       this.from = wf; this.to = wt; this.at = Date.now(); this.state = "ok";
-      idb.set("meta", "outlook", { events: this.events, from: wf, to: wt, at: this.at, account: S.me }).catch(() => {});
+      idb.set("meta", "outlook", { events: this.events, from: wf, to: wt, at: this.at, account: calKey() }).catch(() => {});
     } catch (e) {
       const c = e && e.code;
       this.state = c === "cal_consent" ? "consent" : c === "offline" ? "offline" : c === "reauth" ? "reauth" : "error";
+      if (this.state === "reauth" && calWhich() === "other") trySilentCal();
     }
     this.busy = false;
     if (S.ready && app.classList.contains("paged") && (S.filter.type === "home" || S.filter.type === "calendar")) renderPage();
   },
+  reset() { this.events = []; this.from = ""; this.to = ""; this.at = 0; this.state = ""; this.tried = 0; this.loaded = true; idb.del("meta", "outlook").catch(() => {}); },
   /* Appointments touching the days [from, to). */
   inRange(from, to) { return this.on ? this.events.filter((e) => e.date < to && (e.endDate || e.date) >= from) : []; },
 };
 function olNote() {
-  if (Store.mode !== "cloud") return `<p class="pg-note">Accedi con Microsoft per vedere qui anche gli appuntamenti del tuo calendario Outlook.</p>`;
-  if (P().outlook === false) return `<p class="pg-note">Il calendario di Outlook è nascosto. <button class="link-btn" type="button" data-pg="ol-on">Mostralo</button></p>`;
-  if (OL.state === "consent" || OL.state === "reauth") return `<p class="pg-note">Per vedere qui gli appuntamenti di Outlook serve il tuo permesso, una volta sola: Microsoft ti chiederà di consentire a Quaderno di <b>leggere</b> il calendario. <button class="btn primary" type="button" data-pg="ol-connect">${ic("i-cal", "ic sm")}Collega il calendario Outlook</button></p>`;
-  const when = OL.at ? "aggiornati " + relDate(OL.at) : "in caricamento…";
-  return `<p class="pg-note"><span class="ol-dot"></span> Appuntamenti di Outlook in sola lettura, ${esc(when)}${OL.state === "offline" ? " (sei offline: mostro l'ultima copia)" : OL.state === "error" ? " (l'ultimo aggiornamento non è riuscito)" : ""}. <button class="link-btn" type="button" data-pg="ol-refresh">Aggiorna</button></p>`;
+  if (!Cloud.Auth.configured) return "";
+  const who = calWho(), acc = `<button class="link-btn" type="button" data-pg="ol-account">Account…</button>`;
+  if (!calLinked()) return `<p class="pg-note">Nessun calendario di Outlook collegato. <button class="link-btn" type="button" data-pg="ol-account">Collega un account Microsoft…</button></p>`;
+  if (OL.state === "consent" || OL.state === "reauth") return `<p class="pg-note">Per vedere qui gli appuntamenti di <b>${esc(who || "Outlook")}</b> serve un nuovo accesso a Microsoft: Quaderno chiede solo di <b>leggere</b> il calendario. <button class="btn primary" type="button" data-pg="ol-connect">${ic("i-cal", "ic sm")}Collega il calendario</button> ${acc}</p>`;
+  const when = OL.at ? "aggiornato " + relDate(OL.at) : "in caricamento…";
+  return `<p class="pg-note"><span class="ol-dot"></span> Calendario Outlook di <b>${esc(who || "account Microsoft")}</b>, in sola lettura, ${esc(when)}${OL.state === "offline" ? " (sei offline: mostro l'ultima copia)" : OL.state === "error" ? " (l'ultimo aggiornamento non è riuscito)" : ""}. <button class="link-btn" type="button" data-pg="ol-refresh">Aggiorna</button> ${acc}</p>`;
+}
+/* Connect, switch or disconnect the calendar account (one at a time, on this device). */
+async function calendarAccount() {
+  const m = calMode(), cloud = Store.mode === "cloud", linked = calLinked(), who = calWho();
+  const state = !linked ? "Nessun calendario collegato su questo dispositivo."
+    : m === "other" ? `Collegato a: ${who || "un account Microsoft"}.`
+    : `Collegato a: ${who || "il tuo account"} (lo stesso account di OneDrive).`;
+  const extra = [];
+  if (linked) extra.push({ label: "Scollega", value: "off", danger: true });
+  if (cloud && (m === "other" || !linked)) extra.push({ label: "Usa l'account di OneDrive", value: "main" });
+  const r = await dialog({
+    title: "Calendario di Outlook",
+    text: state + "\n\nPuoi collegare il calendario di qualsiasi account Microsoft (personale, di lavoro o di scuola), anche diverso da quello delle note. Quaderno legge soltanto gli appuntamenti: non li modifica.",
+    ok: linked ? "Collega un altro account…" : "Collega un account…", cancel: "Chiudi", extra,
+  });
+  if (!r) return;
+  if (r.action === "off") {
+    lsSet(CALMODE_KEY, "off"); Cloud.CalAuth.signOut(); OL.reset(); renderAll();
+    toast("Calendario scollegato: gli appuntamenti di Outlook non compaiono più su questo dispositivo.");
+  } else if (r.action === "main") {
+    lsSet(CALMODE_KEY, ""); Cloud.CalAuth.signOut(); if (P().outlook === false) setPrefs({ outlook: true });
+    OL.reset(); renderAll(); OL.ensure(todayStr(), addDays(todayStr(), 14), true);
+    toast("Calendario collegato all'account di OneDrive");
+  } else connectCalendar("");
+}
+async function connectCalendar(hint) {
+  flushEditor();
+  toast("Ti porto alla pagina di Microsoft: scegli l'account del calendario…");
+  try { await Cloud.CalAuth.signIn({ hint }); } catch (e) { toast("Non riesco ad aprire la pagina di Microsoft adesso."); }
+}
+function onCalRedirect(red) {
+  if (red.ok) {
+    lsSet(CALMODE_KEY, "other");
+    try { sessionStorage.removeItem("quaderno.calsilent"); } catch (e) {}
+    OL.reset();
+    if (!red.silent) setTimeout(() => toast("Calendario collegato: " + ((Cloud.CalAuth.account || {}).username || "account Microsoft")), 900);
+  } else if (!red.silent) setTimeout(() => toast("Collegamento del calendario non riuscito: " + String(red.description || red.error || "").split("\n")[0].slice(0, 160)), 900);
+}
+/* Microsoft asks for a new sign-in about once a day: try it quietly, once per session, when nothing is being edited. */
+function trySilentCal() {
+  let tried = true;
+  try { tried = sessionStorage.getItem("quaderno.calsilent") === "1"; sessionStorage.setItem("quaderno.calsilent", "1"); } catch (e) {}
+  const acc = Cloud.CalAuth.account || {};
+  if (tried || !acc.username || ed.dirty || !$("#modal").hidden || document.hidden) return;
+  flushEditor();
+  Cloud.CalAuth.signIn({ silent: true, hint: acc.username }).catch(() => {});
 }
 async function showOutlookEvent(id) {
   const e = OL.events.find((x) => x.id === id);
@@ -3168,7 +3225,8 @@ pagePane.addEventListener("click", (e) => {
     const d = b.dataset;
     if (d.pg === "menu") return openDrawer();
     if (d.pg === "wx-set") return chooseCity();
-    if (d.pg === "ol-connect") return connectOutlook();
+    if (d.pg === "ol-connect") return calWhich() === "other" ? connectCalendar(calWho()) : connectOutlook();
+    if (d.pg === "ol-account") return calendarAccount();
     if (d.pg === "ol-refresh") { OL.state = OL.state === "ok" ? "ok" : ""; OL.ensure(todayStr(), addDays(todayStr(), 14), true); toast("Aggiorno il calendario di Outlook…"); return; }
     if (d.pg === "ol-on") { setPrefs({ outlook: true }); renderPage(true); return; }
     if (d.pg === "wx-menu") return wxMenu(b);
